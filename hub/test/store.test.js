@@ -115,6 +115,21 @@ test("heartbeat keeps credentials unless replaced or proxy is switched off", { s
   assert.equal((await store.getMachine("m-creds")).proxy_enabled, false)
 })
 
+test("a heartbeat that omits identity fields keeps what is stored instead of erasing it", { skip: skipDatabase }, async () => {
+  await store.enrollMachine(enrollment("m-partial"))
+  await store.recordHeartbeat("m-partial", heartbeat({ info: machineInfo({ id: "m-partial" }, { partial: true }) }))
+  const row = await store.getMachine("m-partial")
+  assert.equal(row.name, "name-m-partial", "the name must not degrade to the machine id")
+  assert.equal(row.hostname, "m-partial.local")
+  assert.equal(row.platform, "linux")
+  assert.equal(row.client_version, "3.1.0")
+  await store.recordHeartbeat("m-partial", heartbeat({ info: machineInfo({ id: "m-partial", name: "renamed", platform: "darwin" }, { partial: true }) }))
+  const updated = await store.getMachine("m-partial")
+  assert.equal(updated.name, "renamed")
+  assert.equal(updated.platform, "darwin")
+  assert.equal(updated.hostname, "m-partial.local", "fields not mentioned stay put")
+})
+
 test("heartbeat drops a verified endpoint the machine no longer advertises", { skip: skipDatabase }, async () => {
   await store.enrollMachine(enrollment("m-ep"))
   await store.recordProbe("m-ep", { ok: true, endpoint: "http://10.0.0.5:4097", ms: 3 })

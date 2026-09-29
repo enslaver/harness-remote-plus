@@ -255,18 +255,20 @@ test("machines report offline once heartbeats stop", { skip: skipDatabase }, asy
   }
 })
 
-test("bootstrap: 401 with hub:true when signed out; only proxyable machines when signed in", { skip: skipDatabase }, async () => {
+test("bootstrap: signed-out callers get 200 + authenticated:false (no red console error); only proxyable machines when signed in", { skip: skipDatabase }, async () => {
   hub.forgetCookie()
   const anonymous = await hub.request("/api/v1/bootstrap")
-  assert.equal(anonymous.status, 401)
-  assert.equal(anonymous.json.hub, true)
+  assert.equal(anonymous.status, 200)
+  assert.deepEqual(anonymous.json, { hub: true, authenticated: false, name: "Harness Remote Hub" })
   assert.equal(anonymous.headers.get("www-authenticate"), null)
+  assert.ok(!("machines" in anonymous.json), "nothing about the fleet is disclosed before sign-in")
 
   await enroll(machinePayload({ machine: { id: "machine_boot_yes" } }))
   await enroll(machinePayload({ machine: { id: "machine_boot_no" }, proxy: false }))
   await hub.login()
   const boot = (await hub.request("/api/v1/bootstrap")).json
   assert.equal(boot.hub, true)
+  assert.equal(boot.authenticated, true)
   const ids = boot.machines.map((machine) => machine.id)
   assert.ok(ids.includes("machine_boot_yes"))
   assert.ok(!ids.includes("machine_boot_no"), "a machine that kept its credentials cannot be opened through the hub")

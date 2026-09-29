@@ -9,12 +9,23 @@ import {
 import { bootstrapMachine, publicMachine, publicSession } from "./present.js"
 import { Prober } from "./prober.js"
 import { createMachineProxy, parseProxyPath } from "./proxy.js"
+import { createStaticServer } from "./static.js"
 import {
   ValidationError, agentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
 } from "./validate.js"
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
 const VERSION = "0.1.0"
+
+// The console is first-party static files with no inline script or style, so it can run under a strict
+// policy. The app (Vite build) uses inline styles at runtime, so it only gets the framing restriction.
+const CONSOLE_CSP = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+const APP_CSP = "frame-ancestors 'none'"
+
+const WEB_NOT_BUILT = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Harness Remote Hub</title>
+<body style="font:16px system-ui;padding:24px;max-width:36em;margin:auto"><h1>Web app not built</h1>
+<p>This hub was started without the web client bundle. Build it with <code>npm run build</code> in <code>web/</code> and point <code>HUB_WEB_DIR</code> at <code>web/dist</code>, or use the Docker image, which includes it.</p>
+<p><a href="/hub/">Open the hub console</a></p>`
 
 function limit(value, fallback, max) {
   const parsed = Number(value)
@@ -41,6 +52,8 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
   const machineThrottle = new AttemptThrottle({ max: 20, windowMs: 5 * 60_000, now })
   const clientLogThrottle = new AttemptThrottle({ max: 120, windowMs: 60_000, now })
   const router = new Router()
+  const consoleStatic = createStaticServer({ root: config.publicDir, headers: { "Content-Security-Policy": CONSOLE_CSP } })
+  const appStatic = createStaticServer({ root: config.webDir, spa: true, headers: { "Content-Security-Policy": APP_CSP }, fallbackHtml: WEB_NOT_BUILT })
   const activeProber = prober ?? new Prober({ store, sink, config })
   const proxy = createMachineProxy({ store, config, sink, prober: activeProber, log: (message) => process.stderr.write(`[hub] ${message}\n`) })
   const presentOptions = () => ({ offlineAfterMs: config.offlineAfterMs, now: now() })
@@ -111,12 +124,13 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
 
   // ---- bootstrap for the web app ------------------------------------------------------------
 
-  // Deliberately answers 401 *with* `hub: true`: that is how the web app tells "this origin is a hub
-  // and I must sign in" from "this origin is a plain static host".
+  // "Who am I?" is a question, not a failure, so a signed-out caller gets 200 + `authenticated: false`
+  // (a 401 here would log a red error in every browser console on every first visit). `hub: true` is how
+  // the web app tells "this origin is a hub, sign in" from "this is a plain static host".
   router.add("GET", "/api/v1/bootstrap", async ({ req, res }) => {
     const session = adminAuth.authenticate(req)
     if (!session) {
-      sendJson(res, 401, { error: "unauthenticated", message: "Sign in required", hub: true, name: config.name })
+      sendJson(res, 200, { hub: true, authenticated: false, name: config.name })
       return
     }
     const rows = (await store.listMachines()).filter((row) => row.proxy_enabled && row.credentials_enc)
@@ -125,9 +139,11 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       200,
       {
         hub: true,
+        authenticated: true,
         name: config.name,
         version: VERSION,
         publicUrl: publicUrl(req, config),
+        installCommand: config.installCommand,
         machines: rows.map((row) => bootstrapMachine(row, presentOptions()))
       },
       session.refresh ? { "Set-Cookie": session.refresh } : {}
@@ -184,7 +200,7 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       throw new HttpError(400, "machine_mismatch", "This token belongs to a different machine")
     }
     const update = validated(() => ({
-      info: machineInfo({ ...body.machine, id: row.id }),
+      info: machineInfo({ ...body.machine, id: row.id }, { partial: true }),
       endpoints: endpointList(body.endpoints),
       credentials: credentialsObject(body.credentials) ?? undefined,
       proxyEnabled: body.proxy === true ? true : body.proxy === false ? false : undefined,
@@ -376,8 +392,22 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       }
 
       const match = router.match(req.method ?? "GET", url.pathname)
-      if (!match) throw new HttpError(404, "not_found", "Not found")
-      await match.handler({ req, res, url, params: match.params })
+      if (match) {
+        await match.handler({ req, res, url, params: match.params })
+        return
+      }
+      // An unknown API path must stay a JSON 404: answering it with the SPA's HTML would make a typo look like success.
+      if (url.pathname === "/api" || url.pathname.startsWith("/api/")) throw new HttpError(404, "not_found", "Not found")
+      if (url.pathname === "/hub") {
+        res.writeHead(301, { Location: "/hub/" })
+        res.end()
+        return
+      }
+      if (url.pathname.startsWith("/hub/")) {
+        await consoleStatic(req, res, url.pathname.slice("/hub".length))
+        return
+      }
+      await appStatic(req, res, url.pathname)
     } catch (error) {
       if (!(error instanceof HttpError)) process.stderr.write(`[hub] ${req.method} ${req.url} failed: ${error?.stack ?? error}\n`)
       sendError(res, error)

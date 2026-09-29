@@ -94,7 +94,8 @@ export class Store {
       const verified = current.verified_endpoint && endpoints.includes(current.verified_endpoint) ? current.verified_endpoint : null
       await client.query(
         `update machines set
-           name = $2, hostname = $3, platform = $4, arch = $5, node_version = $6, client_version = $7,
+           name = coalesce($2, name), hostname = coalesce($3, hostname), platform = coalesce($4, platform),
+           arch = coalesce($5, arch), node_version = coalesce($6, node_version), client_version = coalesce($7, client_version),
            endpoints = $8::jsonb, verified_endpoint = $9, config = $10::jsonb, agents = $11::jsonb, stats = $12::jsonb,
            proxy_enabled = case when $13::boolean is null then proxy_enabled else $13::boolean end,
            credentials_enc = case when $14::boolean then null when $15::bytea is not null then $15::bytea else credentials_enc end,

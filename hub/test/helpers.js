@@ -28,6 +28,8 @@ export function testConfig(overrides = {}) {
     HUB_SECRET_KEY: SECRET_KEY,
     HUB_ENROLLMENT_TOKEN: ENROLLMENT_TOKEN,
     HUB_MIGRATIONS_DIR: path.join(root, "migrations"),
+    HUB_PUBLIC_DIR: path.join(root, "public"),
+    HUB_WEB_DIR: path.join(root, "test", "fixtures", "web"),
     ...overrides
   })
 }

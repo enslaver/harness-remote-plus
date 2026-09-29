@@ -20,3 +20,4 @@ bridge/package-lock.json
 hub/node_modules/
 .env
 deploy/data/
+hub/browser-artifacts/

@@ -195,11 +195,17 @@ export function credentialsObject(value) {
   return { username, password }
 }
 
-export function machineInfo(value) {
+/**
+ * `partial` is for heartbeats: a field the machine did not mention is `null`, meaning "leave what you
+ * already have". Enrollment is complete by definition, so it falls back to the hostname, then the id.
+ */
+export function machineInfo(value, { partial = false } = {}) {
   const info = value && typeof value === "object" ? value : {}
+  const id = machineId(info.id)
+  const name = text(info.name, 128) || text(info.hostname, 128)
   return {
-    id: machineId(info.id),
-    name: text(info.name, 128) || text(info.hostname, 128) || info.id,
+    id,
+    name: name || (partial ? null : id),
     hostname: optionalText(info.hostname, 255),
     platform: optionalText(info.platform, 32),
     arch: optionalText(info.arch, 32),

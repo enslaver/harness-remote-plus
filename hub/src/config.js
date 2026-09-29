@@ -95,6 +95,9 @@ export function loadConfig(env = process.env, { readFile = readFileSync } = {}) 
     enrollmentToken,
     lokiUrl: optionalUrl(env, "HUB_LOKI_URL", problems),
     publicUrl: optionalUrl(env, "HUB_PUBLIC_URL", problems),
+    // What the "Add machine" page tells people to run. Defaults to this repository's GitHub install
+    // path because the hub-aware gateway is not on the public npm registry.
+    installCommand: env.HUB_INSTALL_COMMAND || "npx --yes github:enslaver/harness-remote-plus",
     trustProxy: truthy(env.HUB_TRUST_PROXY),
     webDir: env.HUB_WEB_DIR || "./web",
     publicDir: env.HUB_PUBLIC_DIR || "./public",

@@ -82,6 +82,12 @@ test("machineInfo falls back to hostname then id for the display name", () => {
   assert.equal(machineInfo({ id: "m1", name: "a\u0007b\u0000c" }).name, "abc")
 })
 
+test("machineInfo({partial}) leaves absent identity fields null instead of inventing them", () => {
+  assert.equal(machineInfo({ id: "m1" }, { partial: true }).name, null)
+  assert.equal(machineInfo({ id: "m1", hostname: "box" }, { partial: true }).name, "box")
+  assert.equal(machineInfo({ id: "m1" }).name, "m1", "enrollment still falls back to the id")
+})
+
 test("agentList keeps known states and defaults the rest", () => {
   assert.deepEqual(agentList([{ id: "codex", label: "Codex", state: "available" }, { id: "x", state: "weird" }, { label: "no id" }, null]), [
     { id: "codex", label: "Codex", backend: "codex", transport: "acp", state: "available" },

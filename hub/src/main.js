@@ -25,7 +25,12 @@ async function main() {
     throw error
   }
   // Relative directory settings resolve against the package root, not the process cwd.
-  const resolved = { ...config, migrationsDir: path.resolve(root, config.migrationsDir) }
+  const resolved = {
+    ...config,
+    migrationsDir: path.resolve(root, config.migrationsDir),
+    webDir: path.resolve(root, config.webDir),
+    publicDir: path.resolve(root, config.publicDir)
+  }
 
   const keys = deriveKeys(config.secretKey)
   const pool = createPool({ databaseUrl: config.databaseUrl, schema: config.databaseSchema })
