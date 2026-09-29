@@ -177,6 +177,8 @@ npx --yes github:giuliastro/harness-remote --cors https://giuliastro.github.io
 
 The gateway deliberately does not pretend to host the web UI itself; it prints connection information for the client.
 
+Want one address for all your machines, including from an iPhone? Run the [hub](HUB.md): `docker compose up` serves the web app, keeps a registry of every install and collects their logs. Point a machine at it with `--hub https://hub.example.com --hub-token …`.
+
 ## Running from a local checkout
 
 From the repository root, the equivalent launcher is:
