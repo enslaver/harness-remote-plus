@@ -104,7 +104,7 @@ node hub/scripts/e2e-stack.mjs            # a real machine daemon against the re
 ```
 
 `npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles. Packaging workflows
-use narrower named tiers where appropriate (`test:ci:baseline`, `test:ci:pages`, and
+use narrower named tiers where appropriate (`test:ci:baseline` and
 `test:ci:desktop`) while PR validation uses `test:ci:full`.
 
 ## Product and compatibility rules
@@ -240,8 +240,7 @@ Before calling a release complete, verify all of these independently:
 - the `vX.Y.Z` annotated tag points at the release commit;
 - the tag annotation is non-empty;
 - the Android tagged workflow publishes the GitHub Release and signed APK;
-- the Desktop tagged workflow attaches Windows/macOS/Linux artifacts;
-- hosted GitHub Pages deployment is green.
+- the Desktop tagged workflow attaches Windows/macOS/Linux artifacts.
 
 Do not manually move or recreate an already-published release tag to fix packaging. Fix the workflow
 or release metadata, then rerun the builders against the existing immutable tag whenever possible.

@@ -156,17 +156,13 @@ request URLs. Closing the app also closes its active event streams.
 
 ## Progressive Web App (PWA)
 
-The web app is installable and is published straight from this repo via GitHub Pages, at
-https://giuliastro.github.io/harness-remote/. Open that URL over HTTPS and browsers will offer to
-add it to the home screen / app list, opening in its own standalone window.
+The web app is installable. Served over HTTPS (for example by the [hub](docs/HUB.md), which hosts it and
+proxies your machines behind one origin), browsers offer to add it to the home screen / app list, opening in
+its own standalone window. This repository does not publish a hosted copy: there is no GitHub Pages deploy
+here, so a hosted web app is whatever you (or the hub) serve from `web/dist`.
 
-It is redeployed on every merge to `main` that touches `web/`, so it carries the current tip of the
-branch rather than the last release. That is the point: it is where a change gets tried on a real
-phone against a real server before it ships. The packaged builds in [Releases](https://github.com/giuliastro/harness-remote/releases/latest)
-— the Android APK and the three desktop apps — are the stable channel and still come only from `v*`
-tags. If you want a version that was cut deliberately, install one of those.
-
-The deploy runs the web regression suites first, so a merge that breaks them does not reach the URL.
+The packaged builds in [Releases](https://github.com/giuliastro/harness-remote/releases/latest) — the Android
+APK and the three desktop apps — come from `v*` tags.
 
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
   same-origin static assets on a stale-while-revalidate basis, so UI still loads offline or on a
@@ -177,11 +173,11 @@ The deploy runs the web regression suites first, so a merge that breaks them doe
 - The service worker is skipped entirely in the native Android app (Capacitor), packaged Electron,
   and local dev builds; it only registers in production web builds.
 
-Because the app talks to your server cross-origin, the server needs the PWA's origin listed
-in `--cors`:
+When the app is served from an origin other than the hub (a copy you host yourself, or `vite dev`), it talks
+to your server cross-origin, so the server needs that origin listed in `--cors`:
 
 ```bash
-npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://giuliastro.github.io
+npx -y opencode-ai serve --hostname 0.0.0.0 --port 4096 --cors https://your-hosted-copy.example.com
 ```
 
 ## Technology Stack
