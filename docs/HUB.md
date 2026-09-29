@@ -69,6 +69,9 @@ state, and the Session inventory.
 - **Sessions are only listed for agents that are already running.** Harnesses start lazily on purpose; listing a
   sleeping one would wake it, and a monitor that starts every agent on every machine every 30 seconds would be
   worse than none. An agent nobody has used yet simply has no sessions to report.
+- **What each Session is doing and when.** Every Session carries an `activity` (working, needs you, idle, completed,
+  failed, stopped), when it **started** and when it **last ran**, and Claude Code **background agents** are reported
+  as Sessions of kind `background`. All of it is searchable; see [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md).
 - **Transcripts are never read.** The inventory comes from the same lightweight index the web app uses for its
   Session list.
 - **Logs** are what the daemon prints, tapped from stdout/stderr. Lines are scrubbed of the gateway password, hub
@@ -191,7 +194,8 @@ replaces its record). Create expiring, named ones and revoke them when done.
 ## Data and operations
 
 **Postgres** holds current state: `machines` (identity, addresses, sealed credentials, configuration, agent state),
-`machine_config_history`, `sessions`, `enrollment_tokens`. Migrations are forward-only files in `hub/migrations/`,
+`machine_config_history`, `sessions` (with `kind`, `activity`, `started_at`, `last_ran_at`, indexed for search),
+`enrollment_tokens`. Migrations are forward-only files in `hub/migrations/`,
 applied at start under an advisory lock.
 
 **Loki** holds time series, labelled `job=harness-remote`, `kind` (`log`|`event`), `machine_id`, `machine`,
@@ -241,10 +245,11 @@ All JSON over HTTP(S). Machine calls carry `Authorization: Bearer <token>`.
 | Call | Auth | Purpose |
 | --- | --- | --- |
 | `POST /api/v1/machines/enroll` | enrollment token | Register (or re-register) a machine; returns its own token and the heartbeat interval. |
-| `POST /api/v1/machines/heartbeat` | machine token | Identity, addresses, configuration, agents, Sessions, stats. Answers `needCredentials` if the hub has none. |
+| `POST /api/v1/machines/heartbeat` | machine token | Identity, addresses, configuration, agents, Sessions (`kind`, `activity`, `startedAt`, `lastRanAt`), `sessionAgents` (the agents whose list is complete, so a missing Session can be marked *gone*), stats. Answers `needCredentials` if the hub has none. |
 | `POST /api/v1/ingest/logs` | machine token | Up to 1000 lines per batch. `503` = keep the batch; `501` = the hub stores no logs, stop buffering. |
 | `GET /api/v1/bootstrap` | cookie | What the web app needs. Signed out: `200 {hub:true, authenticated:false}`. |
-| `GET /api/v1/machines`, `/sessions`, `/logs`, … | cookie | The console's API. |
+| `GET /api/v1/machines`, `/logs`, … | cookie | The console's API. |
+| `GET /api/v1/sessions?q=&activity=&kind=&ranAfter=&startedAfter=&sort=&limit=&offset=` | cookie | Session search across machines; `total` for paging. See [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md#the-hub-when-a-session-started-when-it-last-ran-and-search). |
 | `ANY /m/<machineId>/…` | cookie | Same-origin proxy to a verified machine. |
 
 ## Developing the hub
