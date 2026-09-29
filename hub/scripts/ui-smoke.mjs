@@ -43,9 +43,12 @@ await hub.request("/api/v1/machines/heartbeat", {
     agents: [{ id: "codex", label: "Codex", state: "available" }, { id: "claude", label: "Claude Code", state: "configured" }],
     config: { backend: "codex", roots: ["/Users/me/dev"] },
     sessions: [
-      { agentId: "codex", id: "s1", title: "Refactor the authentication middleware to use the new session store", directory: "/Users/me/dev/api-server/packages/auth", status: "busy", updatedAt: Date.now() - 60_000 },
-      { agentId: "codex", id: "s2", title: "Fix flaky checkout test", directory: "/Users/me/dev/shop", status: "waiting", updatedAt: Date.now() - 3_600_000 },
-      { agentId: "claude", id: "s3", title: "Write the migration guide", directory: "/Users/me/dev/docs", status: "idle", updatedAt: Date.now() - 86_400_000 }
+      { agentId: "codex", id: "s1", title: "Refactor the authentication middleware to use the new session store", directory: "/Users/me/dev/api-server/packages/auth", status: "busy", startedAt: Date.now() - 3 * 3_600_000, lastRanAt: Date.now() - 60_000 },
+      { agentId: "codex", id: "s2", title: "Fix flaky checkout test", directory: "/Users/me/dev/shop", status: "waiting", startedAt: Date.now() - 6 * 3_600_000, lastRanAt: Date.now() - 3_600_000 },
+      { agentId: "claude", id: "s3", title: "Write the migration guide", directory: "/Users/me/dev/docs", status: "idle", startedAt: Date.now() - 3 * 86_400_000, lastRanAt: Date.now() - 86_400_000 + 3_600_000 },
+      // Claude Code background agents: one that failed a few hours ago, one that finished two days ago.
+      { agentId: "claude", id: "bg1", kind: "background", title: "Bump dependencies", directory: "/Users/me/dev/shop", status: "failed", activity: "failed", detail: "Tests failed", startedAt: Date.now() - 5 * 3_600_000, lastRanAt: Date.now() - 4 * 3_600_000 },
+      { agentId: "claude", id: "bg2", kind: "background", title: "Refactor the parser", directory: "/Users/me/dev/api-server", status: "done", activity: "completed", startedAt: Date.now() - 2 * 86_400_000, lastRanAt: Date.now() - 2 * 86_400_000 + 600_000 }
     ]
   }
 })
@@ -131,7 +134,7 @@ try {
 
   const cards = await page.locator("a.card").allTextContents()
   check("machines: both machines listed", cards.length === 2, `${cards.length} cards`)
-  check("machines: sessions and web-ui state shown", /3 sessions/.test(cards.join(" ")) && /Web UI ready/.test(cards.join(" ")) && /Web UI off/.test(cards.join(" ")), cards.join(" | "))
+  check("machines: sessions and web-ui state shown", /5 sessions/.test(cards.join(" ")) && /Web UI ready/.test(cards.join(" ")) && /Web UI off/.test(cards.join(" ")), cards.join(" | "))
   check("machines: offline machine is marked offline", (await page.locator(".dot.offline").count()) === 1)
 
   if (insets) {
@@ -174,10 +177,66 @@ try {
   await page.waitForSelector("#view .card")
   await layout(page, "sessions")
   await shot(page, "04-sessions")
-  check("sessions: all three listed", (await page.locator("#view .card").count()) === 3)
-  await page.selectOption("#state", "waiting")
-  await page.waitForFunction(() => document.querySelectorAll("#view .card").length === 1)
-  check("sessions: status filter narrows the list", /flaky checkout/.test(await page.textContent("#view")))
+  await page.evaluate(() => { document.querySelector("details.more").open = true })
+  const titles = async () => page.locator("#view .card.session strong").allTextContents()
+  const settle = async (count) => page.waitForFunction((n) => document.querySelectorAll("#view .card.session").length === n, count)
+  check("sessions: all five listed, background agents marked", (await page.locator("#view .card.session").count()) === 5 && (await page.locator("#view .pill:text('Background')").count()) === 2)
+  check("sessions: each shows an activity, when it started and when it last ran", /Working/.test(await page.textContent("#view")) && /Needs you/.test(await page.textContent("#view")) && (await page.locator("#view .times").allTextContents()).every((text) => /Started .* ago/.test(text) && /Last ran /.test(text)))
+
+  const showsOnly = (title) => page.waitForFunction((expected) => {
+    const cards = Array.from(document.querySelectorAll("#view .card.session strong")).map((node) => node.textContent)
+    return cards.length === 1 && cards[0].indexOf(expected) === 0
+  }, title)
+  await page.selectOption("#activity", "needs_input")
+  await showsOnly("Fix flaky checkout")
+  check("sessions: the status filter narrows the list", /flaky checkout/.test(await page.textContent("#view")))
+  await page.selectOption("#activity", "failed")
+  await showsOnly("Bump dependencies")
+  check("sessions: failed shows the failed background agent", /Bump dependencies/.test(await page.textContent("#view")))
+  await page.selectOption("#activity", "completed")
+  await showsOnly("Refactor the parser")
+  check("sessions: completed shows the finished one", /Refactor the parser/.test(await page.textContent("#view")))
+  await page.selectOption("#activity", "")
+
+  await page.selectOption("#kind", "background")
+  await settle(2)
+  check("sessions: background agents can be shown on their own", (await titles()).sort().join("|") === "Bump dependencies|Refactor the parser")
+  await page.selectOption("#kind", "")
+
+  await page.selectOption("#ran", "24h")
+  await settle(4)
+  check("sessions: 'last ran' window drops what has not run in a day", !(await titles()).some((title) => /Refactor the parser/.test(title)))
+  await page.selectOption("#ran", "")
+  await page.selectOption("#started", "24h")
+  await settle(3)
+  check("sessions: 'started' window is independent", (await titles()).length === 3)
+  await page.selectOption("#started", "")
+  await settle(5)
+
+  await page.fill("#q", "parser")
+  await showsOnly("Refactor the parser")
+  check("sessions: search finds by title", /Refactor the parser/.test(await page.textContent("#view")))
+  await page.fill("#q", "")
+  await settle(5)
+
+  await page.selectOption("#groupby", "status")
+  await page.waitForSelector(".group")
+  const order = await page.locator(".group-title").allTextContents()
+  check("sessions: grouped by status, what needs you first", /^Needs you/.test(order[0]) && /^Working/.test(order[1]) && /^Failed/.test(order[2]) && /^Completed/.test(order[3]) && /^Idle/.test(order[4]), order.join(" | "))
+  await shot(page, "04b-sessions-by-status")
+  await page.selectOption("#groupby", "project")
+  await page.waitForFunction(() => Array.from(document.querySelectorAll(".group-title")).some((node) => /^shop/.test(node.textContent)))
+  const shop = await page.locator(".group", { hasText: "shop" }).first().locator(".card.session").count()
+  check("sessions: grouped by project, across agents", shop === 2, String(shop))
+  await page.selectOption("#groupby", "none")
+  await settle(5)
+  check("sessions: no grouping is one recent feed, newest first", (await titles())[0] === "Refactor the authentication middleware to use the new session store")
+  await page.selectOption("#groupby", "status")
+  await page.reload()
+  await page.waitForSelector(".group")
+  check("sessions: the grouping is remembered", (await page.inputValue("#groupby")) === "status")
+  await page.selectOption("#groupby", "none")
+  await layout(page, "sessions (all filters)")
 
   await page.goto(`${hub.base}/hub/#/logs`)
   await page.waitForSelector(".logline")

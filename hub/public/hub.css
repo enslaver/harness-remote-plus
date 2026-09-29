@@ -237,3 +237,21 @@ details > summary { min-height: 44px; display: flex; align-items: center; cursor
 @media (prefers-reduced-motion: no-preference) {
   .btn, a.card { transition: background-color 0.15s ease, opacity 0.15s ease; }
 }
+
+/* Sessions: grouped results and the wider filter set. */
+.filters .field select { text-overflow: ellipsis; }
+.group { margin-bottom: 18px; }
+.group-title { margin: 14px 0 8px; font-size: 15px; }
+.group[data-activity="needs_input"] .group-title { color: var(--warn); }
+.group[data-activity="failed"] .group-title { color: var(--bad); }
+.group[data-activity="completed"] .group-title { color: var(--ok); }
+.card.session .times { color: var(--muted); }
+
+details.more { margin-bottom: 12px; }
+details.more > summary { cursor: pointer; padding: 10px 2px; font-weight: 600; color: var(--muted); list-style-position: inside; min-height: 44px; display: flex; align-items: center; }
+details.more[open] > summary { color: var(--text); }
+details.more .filters { margin-top: 6px; }
+details.more > summary { list-style: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "\25B8"; display: inline-block; margin-right: 8px; transition: transform .12s ease; }
+details.more[open] > summary::before { transform: rotate(90deg); }
