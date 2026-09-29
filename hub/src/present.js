@@ -49,8 +49,15 @@ export function publicSession(row) {
     title: row.title,
     directory: row.directory,
     status: row.status,
+    kind: row.kind,
+    activity: row.activity,
+    detail: row.detail || undefined,
+    // When it started and when it last ran: the two times a search is usually about.
+    startedAt: row.started_at,
+    lastRanAt: row.last_ran_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at
   }
 }

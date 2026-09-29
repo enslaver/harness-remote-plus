@@ -11,7 +11,7 @@ import { Prober } from "./prober.js"
 import { createMachineProxy, parseProxyPath } from "./proxy.js"
 import { createStaticServer } from "./static.js"
 import {
-  ValidationError, agentList, sessionAgentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
+  ValidationError, agentList, sessionQuery, sessionAgentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
 } from "./validate.js"
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
@@ -335,13 +335,9 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
   }))
 
   router.add("GET", "/api/v1/sessions", admin(async ({ res, url }) => {
-    const rows = await store.listSessions({
-      machineId: url.searchParams.get("machine") || undefined,
-      status: url.searchParams.get("status") || undefined,
-      query: (url.searchParams.get("q") || "").slice(0, 200) || undefined,
-      limit: limit(url.searchParams.get("limit"), 100, 500)
-    })
-    sendJson(res, 200, { sessions: rows.map(publicSession) })
+    const query = validated(() => sessionQuery(url.searchParams, now()))
+    const { rows, total } = await store.searchSessions(query)
+    sendJson(res, 200, { sessions: rows.map(publicSession), total, limit: query.limit, offset: query.offset })
   }))
 
   router.add("GET", "/api/v1/enrollment-tokens", admin(async ({ res }) => {

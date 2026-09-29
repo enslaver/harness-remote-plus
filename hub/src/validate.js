@@ -4,6 +4,8 @@
  * bounded, plain values before it reaches SQL, Loki labels, or the admin UI.
  */
 
+import { ACTIVITIES, resolveActivity } from "./activity.js"
+
 export class ValidationError extends Error {
   constructor(message) {
     super(message)
@@ -180,6 +182,8 @@ function timestamp(value) {
   return date.toISOString()
 }
 
+const SESSION_KINDS = new Set(["session", "background"])
+
 export function sessionList(value) {
   if (!Array.isArray(value)) return []
   const perAgent = new Map()
@@ -191,18 +195,71 @@ export function sessionList(value) {
     const count = perAgent.get(agentId) ?? 0
     if (count >= MAX_SESSIONS_PER_AGENT) continue
     perAgent.set(agentId, count + 1)
+    const status = text(session.status, 32) || "unknown"
     sessions.push({
       agent_id: agentId,
       session_id: id,
       title: text(session.title, 300),
       directory: text(session.directory, 1_024),
-      status: text(session.status, 32) || "unknown",
-      created_at: timestamp(session.createdAt),
-      updated_at: timestamp(session.updatedAt)
+      status,
+      kind: SESSION_KINDS.has(session.kind) ? session.kind : "session",
+      activity: resolveActivity(session.activity, status),
+      detail: text(session.detail, 300),
+      // `createdAt` / `updatedAt` are what machines reported before these two fields existed.
+      created_at: timestamp(session.startedAt ?? session.createdAt),
+      updated_at: timestamp(session.lastRanAt ?? session.updatedAt)
     })
     if (sessions.length >= MAX_SESSIONS) break
   }
   return sessions
+}
+
+const RELATIVE_WHEN = /^(\d{1,4})\s*(m|h|d|w)$/i
+const RELATIVE_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }
+
+/**
+ * A point in time from a search box: an ISO date or date-time (`2026-09-29`, `2026-09-29T14:00Z`), or an age
+ * (`90m`, `24h`, `7d`, `2w`) meaning "that long ago". Anything else is a 400, not a silently ignored filter.
+ */
+export function parseWhen(value, now = Date.now()) {
+  const raw = String(value ?? "").trim()
+  if (!raw) return null
+  const relative = RELATIVE_WHEN.exec(raw)
+  if (relative) return new Date(now - Number(relative[1]) * RELATIVE_UNIT_MS[relative[2].toLowerCase()])
+  // Bare digits would be read as a year or a timestamp by Date.parse; require a date shape.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) throw new ValidationError(`"${raw.slice(0, 40)}" is not a date (use 2026-09-29, an ISO time, or an age like 24h or 7d)`)
+  const parsed = new Date(raw)
+  if (!Number.isFinite(parsed.getTime())) throw new ValidationError(`"${raw.slice(0, 40)}" is not a valid date`)
+  return parsed
+}
+
+const SORTS = new Set(["last_ran", "started"])
+
+/** The Session search the console and the API share, validated once. */
+export function sessionQuery(params, now = Date.now()) {
+  const get = (name) => (params.get(name) || "").trim()
+  const list = (name, allowed) => {
+    const items = get(name).split(",").map((item) => item.trim()).filter(Boolean)
+    for (const item of items) if (!allowed(item)) throw new ValidationError(`${name} has an unknown value: ${item.slice(0, 40)}`)
+    return items.length ? items : undefined
+  }
+  const query = {
+    machineId: get("machine") || undefined,
+    agentId: get("agent") || undefined,
+    kind: get("kind") || undefined,
+    activities: list("activity", (item) => item === "active" || ACTIVITIES.includes(item)),
+    status: get("status") || undefined,
+    query: get("q").slice(0, 200) || undefined,
+    startedAfter: parseWhen(get("startedAfter"), now),
+    startedBefore: parseWhen(get("startedBefore"), now),
+    ranAfter: parseWhen(get("ranAfter"), now),
+    ranBefore: parseWhen(get("ranBefore"), now),
+    sort: SORTS.has(get("sort")) ? get("sort") : "last_ran",
+    limit: Math.min(Math.max(Number(get("limit")) || 100, 1), 500),
+    offset: Math.min(Math.max(Number(get("offset")) || 0, 0), 10_000)
+  }
+  if (query.kind && !SESSION_KINDS.has(query.kind)) throw new ValidationError(`kind must be one of ${[...SESSION_KINDS].join(", ")}`)
+  return query
 }
 
 /**
