@@ -8,7 +8,8 @@
     "start": "node src/main.js",
     "test": "node --test --test-concurrency=4 \"test/*.test.js\"",
     "e2e": "node scripts/e2e-stack.mjs",
-    "smoke:ui": "node scripts/ui-smoke.mjs"
+    "smoke:ui": "node scripts/ui-smoke.mjs",
+    "smoke:app": "node scripts/app-smoke.mjs"
   },
   "engines": {
     "node": ">=22"

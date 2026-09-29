@@ -14,6 +14,7 @@ import {
 import { clientEnvironment, installClientErrorReporting, postClientLogs } from "./clientLog"
 import { ErrorBoundary } from "./ErrorBoundary"
 import { fetchHubBootstrap, sameHubMachines } from "./hubBootstrap"
+import { installIosSafari } from "./iosSafari"
 import {
   claimMachinePairing,
   scanAndroidMachinePairing,
@@ -50,9 +51,12 @@ import "./machine-pairing.css"
 // Loaded last: the ported controls refine rules the sheets above already set, and settling those
 // ties by load order is what keeps the port free of `!important`.
 import "./beautiful-ui-controls.css"
+// iOS Safari only (scoped to html[data-hr-ios]); after everything else so it settles ties by load order.
+import "./ios-safari.css"
 
 installAppPreferences()
 installCompletionAudioGuard()
+installIosSafari()
 
 type PairingNotice = {
   kind: "working" | "success" | "error"

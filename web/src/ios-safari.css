@@ -1,0 +1,26 @@
+/* iOS Safari only. Every rule is scoped to html[data-hr-ios="1"], which iosSafari.ts sets after sniffing an
+   iPhone/iPad, so nothing here can reach Android, desktop or the native shells. Loaded last so it wins
+   ties with the mobile sheets, which are !important-heavy; the extra attribute selectors below also
+   out-rank them on specificity, which is what actually decides between two !important declarations. */
+
+html[data-hr-ios="1"] {
+  /* Without this, iOS re-inflates text in landscape, breaking the fixed-height mobile rows. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Entry fields at 16px. iOS zooms the page on focus for anything smaller and never zooms back out.
+   Buttons, checkboxes and the like do not zoom and keep their compact sizes. */
+html[data-hr-ios="1"] :is(input, textarea, select):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"]) {
+  font-size: 16px !important;
+}
+
+/* Keyboard open: size the app to what is actually visible, and get the nav out of the way so the
+   composer sits directly above the keyboard. `100dvh` does not shrink for the keyboard on iOS. */
+html[data-hr-ios="1"][data-hr-keyboard="open"] .hr-mobile-nav { display: none !important; }
+html[data-hr-ios="1"][data-hr-keyboard="open"] .uw-standalone-host,
+html[data-hr-ios="1"][data-hr-keyboard="open"] .hr-control-plane.tdw-shell,
+html[data-hr-ios="1"][data-hr-keyboard="open"] .hr-control-plane:has(.tdw-main.mobile-open) .tdw-layout {
+  height: var(--hr-vv-height, 100dvh) !important;
+  min-height: var(--hr-vv-height, 100dvh) !important;
+}

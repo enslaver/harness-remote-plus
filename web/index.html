@@ -4,14 +4,22 @@
     <meta charset="UTF-8" />
     <!-- interactive-widget: without it Chrome on Android leaves the layout at full height when the
          on-screen keyboard opens, so the sticky composer ends up behind the keyboard. -->
+    <!-- Deliberately NOT viewport-fit=cover. That flag makes iOS extend the page under the notch and home
+         indicator and switches every env(safe-area-inset-*) rule in the stylesheets on at once; the
+         bottom nav is a fixed 56px tall with padding-bottom: env(safe-area-inset-bottom), so a real
+         34px inset would squeeze its buttons to ~20px, and the list-view top bar has no top inset at
+         all. Without it iOS letterboxes the page inside the safe area, which is what ships today.
+         Edge-to-edge needs those surfaces reworked first (ios-safari-regression.test.mjs pins this). -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
     <title>Harness Remote</title>
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icon-192.png" />
-    <link rel="apple-touch-icon" href="icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png" />
     <meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Harness Remote" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   </head>
   <body>
