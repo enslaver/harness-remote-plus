@@ -181,6 +181,12 @@ try {
     return response.json?.sessions?.length ? response.json.sessions : null
   }, { timeoutMs: 45_000 })
   check("sessions: the hub's inventory lists it, with its machine and agent", inventory.some((session) => session.machineId === id && session.agentId === "omp"), JSON.stringify(inventory[0]))
+  const sample = inventory.find((session) => session.machineId === id)
+  check("sessions: it has an activity, a start time and a last-ran time", ["working", "needs_input", "idle", "completed", "failed", "stopped", "unknown"].includes(sample?.activity) && Number.isFinite(Date.parse(sample?.startedAt)) && (sample?.lastRanAt === null || Number.isFinite(Date.parse(sample?.lastRanAt))), JSON.stringify(sample))
+  const recentSearch = (await api(`/api/v1/sessions?machine=${encodeURIComponent(id)}&startedAfter=1h&q=${encodeURIComponent("e2e")}`)).json
+  check("sessions: the hub can search by when it started, and by text", recentSearch.total >= 1 && recentSearch.sessions.some((session) => session.id === sample.id), JSON.stringify(recentSearch).slice(0, 200))
+  check("sessions: a start window that excludes it finds nothing", (await api(`/api/v1/sessions?machine=${encodeURIComponent(id)}&startedBefore=2000-01-01`)).json.total === 0)
+  check("sessions: a malformed date is refused, not ignored", (await api("/api/v1/sessions?ranAfter=whenever")).status === 400)
   const sessionEvents = await until("the Session event in Loki", async () => {
     const response = await api(`/api/v1/logs?machine=${encodeURIComponent(id)}&kind=event&since=15m&q=session.created`)
     return response.json?.entries?.length ? response.json.entries : null
