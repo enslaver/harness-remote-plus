@@ -95,3 +95,16 @@ export function parseRoute(hash) {
   if (["sessions", "logs", "enroll"].indexOf(parts[0]) >= 0) return { name: parts[0] }
   return { name: "machines" }
 }
+
+/**
+ * Where to go after signing in, from `?next=`. Only a same-origin path: `//host`, `/\host`, absolute URLs
+ * and `javascript:` all lead off-site, and a login page that redirects anywhere is an open redirect.
+ * The console itself is excluded so a bad link cannot bounce the user in a circle.
+ */
+export function safeNext(search) {
+  const value = new URLSearchParams(search || "").get("next")
+  if (!value || value.charAt(0) !== "/" || value.charAt(1) === "/" || value.charAt(1) === "\\") return null
+  if (/[\u0000-\u001f\u007f]/.test(value)) return null
+  if (value === "/hub" || value.indexOf("/hub/") === 0 || value.indexOf("/hub?") === 0) return null
+  return value
+}

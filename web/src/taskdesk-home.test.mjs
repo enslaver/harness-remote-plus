@@ -78,14 +78,15 @@ test("Session-first workspace keeps machines projects harness filters models and
   assert.match(observer, /deferModelFallback/)
 })
 
-test("desktop-owned local machine stays visible but cannot be edited or removed", () => {
+test("runtime-owned machines (desktop runtime, hub) stay visible but cannot be edited or removed", () => {
   const standalone = read("./components/standalone-universal-workspace.tsx")
 
-  assert.match(standalone, /isDesktopLocalMachine/)
-  assert.match(standalone, /const runtimeOwned = isDesktopLocalMachine\(machine\)/)
+  assert.match(standalone, /isRuntimeOwnedMachine/)
+  assert.match(standalone, /const runtimeOwned = isRuntimeOwnedMachine\(machine\)/)
   assert.match(standalone, /data-runtime-owned=\{runtimeOwned \|\| undefined\}/)
   assert.match(standalone, /Managed by Harness Remote/)
-  assert.match(standalone, /if \(isDesktopLocalMachine\(machine\)\) return[\s\S]*const remove = \(machine: WorkspaceMachine\) => \{[\s\S]*if \(isDesktopLocalMachine\(machine\)\) return/)
+  assert.match(standalone, /Managed by your hub/)
+  assert.match(standalone, /if \(isRuntimeOwnedMachine\(machine\)\) return[\s\S]*const remove = \(machine: WorkspaceMachine\) => \{[\s\S]*if \(isRuntimeOwnedMachine\(machine\)\) return/)
   assert.match(standalone, /\{!runtimeOwned \? \([\s\S]*setEditingID\(machine\.id\)[\s\S]*setConfirmRemoveID\(machine\.id\)[\s\S]*\) : null\}/)
   assert.match(standalone, /state === "offline" \? <button[^>]*data-machine-retry/, 'runtime-owned machines must keep the normal health retry action')
 })

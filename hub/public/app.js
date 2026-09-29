@@ -1,4 +1,4 @@
-import { ago, clip, clock, h, installCommands, parseRoute, pretty, proxyState, sessionTone } from "./util.js"
+import { ago, clip, clock, h, installCommands, parseRoute, pretty, proxyState, safeNext, sessionTone } from "./util.js"
 
 const app = document.getElementById("app")
 let hub = { name: "Harness Remote Hub", publicUrl: location.origin, installCommand: "npx --yes github:enslaver/harness-remote-plus" }
@@ -561,6 +561,12 @@ async function start() {
       return
     }
     hub = { name: boot.name, publicUrl: boot.publicUrl, installCommand: boot.installCommand || hub.installCommand }
+    // The web app sends people here to sign in and asks to be returned to.
+    const next = safeNext(location.search)
+    if (next) {
+      location.replace(next)
+      return
+    }
   } catch (error) {
     if (error instanceof AuthError) return
     app.replaceChildren(errorBox(error, start))

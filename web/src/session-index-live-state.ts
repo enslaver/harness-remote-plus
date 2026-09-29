@@ -28,7 +28,7 @@ export const LIVE_SESSION_ERROR_GRACE_MS = 2 * 60_000
 
 type LiveStatus = { status: SessionStatus; observedAt: number }
 type LiveError = { message: string; observedAt: number }
-type SessionIndexConfig = Pick<ServerConfig, "host" | "port" | "username" | "backend" | "agentId">
+type SessionIndexConfig = Pick<ServerConfig, "host" | "port" | "username" | "backend" | "agentId" | "basePath">
 
 type LiveEvent = {
   type: string
@@ -50,7 +50,9 @@ function endpointKey(config: SessionIndexConfig): string {
   // A Harness machine can expose multiple routed agents of the same backend. The agent id is part of
   // transport identity just like backend/host/port: retry/error state from one OpenCode agent must
   // never project onto a different OpenCode agent that happens to share the daemon endpoint.
-  return `${host}:${config.port}|${config.username.trim()}|${config.backend}|${config.agentId?.trim() || ""}`
+  // basePath too: machines proxied by one hub share host and port, and retry/error state from one must
+  // never project onto another.
+  return `${host}:${config.port}${config.basePath?.trim() || ""}|${config.username.trim()}|${config.backend}|${config.agentId?.trim() || ""}`
 }
 
 function pruneLiveStatuses(key: string, now: number): void {

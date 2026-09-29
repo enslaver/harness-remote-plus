@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { streamURL } from './opencode-events.ts'
-import { agentScopedPath, authHeader, baseUrl, hasCredentials, isValidServerConfig, machineBaseUrl, normalizeServerHost } from './serverConfig.ts'
+import { agentScopedPath, authHeader, baseUrl, hasCredentials, isValidServerConfig, machineBaseUrl, normalizeBasePath, normalizeServerConfig, normalizeServerHost } from './serverConfig.ts'
 
 const config = (host, port = 4096) => ({ backend: 'opencode', host, port, username: 'opencode', password: 'secret' })
 
@@ -29,6 +29,26 @@ assert.equal(agentScopedPath(daemon, '/session'), '/v1/agents/opencode/session')
 assert.equal(agentScopedPath({ ...daemon, agentId: undefined }, '/session'), '/session')
 assert.equal(streamURL(baseUrl(daemon), 'global'), 'http://192.168.1.64:4097/v1/agents/opencode/global/event')
 assert.equal(baseUrl({ ...daemon, agentId: 'claude/code' }), 'http://192.168.1.64:4097/v1/agents/claude%2Fcode')
+
+// A machine served by a hub lives under a path prefix on the hub's own host and port.
+const hubMachine = { backend: 'opencode', host: 'https://hub.example.com', port: 443, username: '', password: '', basePath: '/m/machine_abc' }
+assert.equal(machineBaseUrl(hubMachine), 'https://hub.example.com:443/m/machine_abc')
+assert.equal(baseUrl({ ...hubMachine, agentId: 'codex' }), 'https://hub.example.com:443/m/machine_abc/v1/agents/codex')
+assert.equal(machineBaseUrl({ ...hubMachine, basePath: undefined }), 'https://hub.example.com:443', 'no prefix -> byte-for-byte the previous URL')
+assert.equal(machineBaseUrl({ ...hubMachine, basePath: '/m/machine_abc/' }), 'https://hub.example.com:443/m/machine_abc', 'a trailing slash is dropped')
+assert.equal(normalizeBasePath(undefined), '')
+assert.equal(normalizeBasePath(''), '')
+assert.equal(normalizeBasePath('/'), '')
+assert.equal(normalizeBasePath(' /m/x '), '/m/x')
+assert.equal(normalizeBasePath('/m/machine_a%20b'), '/m/machine_a%20b')
+for (const bad of ['m/x', '/m/../x', '/m/%2e%2e/x', '/m/%2E%2E', '/./x', '/m//x', '/m/x?a=1', '/m/x#f', '/m/x y', 'http://evil/x', '//evil.example/x', '/m/%zz', '/m/\\x']) {
+  assert.equal(normalizeBasePath(bad), null, `should reject ${bad}`)
+}
+assert.equal(isValidServerConfig(hubMachine), true)
+assert.equal(isValidServerConfig({ ...hubMachine, basePath: '/../x' }), false, 'a bad prefix makes the whole config invalid, so it can never build a URL')
+assert.equal(normalizeServerConfig({ ...hubMachine, basePath: ' /m/machine_abc/ ' }).basePath, '/m/machine_abc')
+assert.equal('basePath' in normalizeServerConfig({ ...hubMachine, basePath: '' }), false, 'an empty prefix is not stored at all')
+assert.equal('basePath' in normalizeServerConfig(daemon), false)
 
 const main = readFileSync(new URL('./main.tsx', import.meta.url), 'utf8')
 const standalone = readFileSync(new URL('./components/standalone-universal-workspace.tsx', import.meta.url), 'utf8')

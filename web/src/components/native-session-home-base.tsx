@@ -457,6 +457,7 @@ export function NativeSessionHome({
       machine.id,
       machine.config.host,
       machine.config.port,
+      machine.config.basePath || "",
       machine.config.username,
       machine.config.password,
       machine.config.agentId || "",

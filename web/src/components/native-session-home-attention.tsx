@@ -197,6 +197,7 @@ export function NativeSessionHome(props: Props) {
     target.machineID,
     target.baseConfig.host,
     target.baseConfig.port,
+    target.baseConfig.basePath || "",
     target.baseConfig.username,
     target.baseConfig.password,
     target.agent.processID ?? "",

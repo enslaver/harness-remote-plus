@@ -426,6 +426,7 @@ function sameServer(left: ServerConfig, right: ServerConfig): boolean {
     && left.username === right.username
     && left.password === right.password
     && (left.agentId || "") === (right.agentId || "")
+    && (left.basePath || "") === (right.basePath || "")
 }
 
 function entryForRead(config: ServerConfig, sessionID: string, directory?: string): NativeConversationEntry | undefined {

@@ -264,6 +264,7 @@ export function NativeSessionObserver({
     target.directory,
     target.config.host,
     target.config.port,
+    target.config.basePath,
     target.config.username,
     target.config.password,
     target.config.agentId,

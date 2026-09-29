@@ -13,7 +13,7 @@ assert.match(liveRefresh, /Capacitor\.getPlatform\(\) === "android"/, 'Android l
 assert.match(api, /if \(isDesktopPlatform\(\)\)/, 'Electron must select desktop request transport before browser/native paths')
 assert.match(api, /desktopRequest\(config,/, 'Desktop request must resolve profile only after synchronization finishes')
 assert.match(main, /syncDesktopProfiles\(persistedMachines\)/, 'Desktop bootstrap must acknowledge persistent remote machines before discovery')
-assert.match(main, /const persistent = nextMachines\.filter\(\(machine\) => !isDesktopLocalMachine\(machine\)\)/, 'Desktop persistence must exclude the runtime-owned local machine')
+assert.match(main, /const persistent = nextMachines\.filter\(\(machine\) => !isRuntimeOwnedMachine\(machine\)\)/, 'Persistence must exclude runtime-owned machines (the desktop local runtime and hub machines)')
 assert.match(main, /syncDesktopProfiles\(persistent\)/, 'Later desktop profile synchronization must remain limited to persistent machines')
 assert.match(main, /username: ""[\s\S]*password: ""/, 'Renderer local runtime projection must not receive the embedded daemon credentials')
 assert.match(desktopBridge, /profile\.id === localRuntime\.machine\.profileId/, 'Desktop profile synchronization must omit the volatile local runtime profile')

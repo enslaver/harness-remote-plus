@@ -25,6 +25,28 @@ export function normalizeServerHost(host: string): string | null {
   return explicitScheme ? `${url.protocol}//${hostname}` : hostname
 }
 
+const BASE_PATH_SEGMENT = "[A-Za-z0-9._~%!$&'()*+,;=:@-]+"
+const BASE_PATH_PATTERN = new RegExp(`^(?:/${BASE_PATH_SEGMENT})+$`)
+
+/**
+ * A machine served under a path prefix (a hub proxying it at `/m/<id>`). Returns "" for none, the
+ * cleaned prefix, or null when it is not a plain absolute path. Dot segments are refused in both raw and
+ * percent-encoded form: a stored config must not be able to walk out of its own prefix.
+ */
+export function normalizeBasePath(value: string | undefined): string | null {
+  const raw = (value ?? "").trim()
+  if (!raw || raw === "/") return ""
+  const trimmed = raw.replace(/\/+$/, "")
+  if (!BASE_PATH_PATTERN.test(trimmed)) return null
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(trimmed)
+  } catch {
+    return null
+  }
+  return decoded.split("/").some((segment) => segment === "." || segment === "..") ? null : trimmed
+}
+
 /**
  * Canonicalize the machine endpoint once. Browser, Android and Electron must all resolve the same
  * stored machine even when a user typed LOCALHOST, a trailing slash, or invisible credential
@@ -34,12 +56,18 @@ export function normalizeServerConfig(config: ServerConfig): ServerConfig | null
   const host = normalizeServerHost(config.host)
   if (!host || !Number.isInteger(config.port) || config.port < 1 || config.port > 65_535) return null
   const agentId = config.agentId?.trim() || undefined
+  const basePath = normalizeBasePath(config.basePath)
+  if (basePath === null) return null
+  const { basePath: _dropped, ...rest } = config
+  void _dropped
   return {
-    ...config,
+    ...rest,
     host,
     username: config.username.trim(),
     password: config.password.trim(),
-    agentId
+    agentId,
+    // Only present when set, so a machine reached directly serialises exactly as it always has.
+    ...(basePath ? { basePath } : {})
   }
 }
 
@@ -48,7 +76,7 @@ export function machineBaseUrl(config: ServerConfig): string {
   const schemeMatch = host.match(/^(https?):\/\//i)
   const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : "http"
   const cleanHost = schemeMatch ? host.slice(schemeMatch[0].length) : host
-  return `${scheme}://${cleanHost}:${config.port}`
+  return `${scheme}://${cleanHost}:${config.port}${normalizeBasePath(config.basePath) ?? ""}`
 }
 
 /**

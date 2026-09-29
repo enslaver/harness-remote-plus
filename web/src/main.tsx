@@ -11,7 +11,9 @@ import {
   retryDesktopLocalRuntime,
   syncDesktopProfiles
 } from "./desktopBridge"
+import { clientEnvironment, installClientErrorReporting, postClientLogs } from "./clientLog"
 import { ErrorBoundary } from "./ErrorBoundary"
+import { fetchHubBootstrap, sameHubMachines } from "./hubBootstrap"
 import {
   claimMachinePairing,
   scanAndroidMachinePairing,
@@ -23,7 +25,7 @@ import { SERVER_STORAGE_KEYS } from "./storageKeys"
 import { useTranslator } from "./useTranslator"
 import {
   DESKTOP_LOCAL_MACHINE_ID,
-  isDesktopLocalMachine,
+  isRuntimeOwnedMachine,
   loadWorkspaceMachines,
   persistWorkspaceMachines,
   type WorkspaceMachine
@@ -74,15 +76,101 @@ function localRuntimeMachine(state: DesktopLocalRuntimeState | null): WorkspaceM
   }
 }
 
+const HUB_SIGNIN_REDIRECT_KEY = "harness-remote.hub.signin-redirect"
+const HUB_POLL_MS = 30_000
+const HUB_RETRY_MS = 15_000
+const HUB_MAX_UNDETECTED_RETRIES = 4
+
+/**
+ * Served by a hub, this app asks it which machines exist (see hubBootstrap.ts). Anywhere else the ask
+ * gets a definitive "no" and nothing changes. Hub machines are runtime-owned projections, exactly like
+ * the desktop app's own runtime: shown, never persisted, never edited here.
+ */
+function useHubMachines(enabled: boolean) {
+  const [phase, setPhase] = useState<"loading" | "settled">(enabled ? "loading" : "settled")
+  const [machines, setMachines] = useState<WorkspaceMachine[]>([])
+  const [slow, setSlow] = useState(false)
+
+  useEffect(() => {
+    if (!enabled) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let detected = false
+    let undetectedRetries = 0
+    let stopReporting: (() => void) | undefined
+    const slowTimer = setTimeout(() => setSlow(true), 800)
+    const settle = () => { if (!cancelled) setPhase("settled") }
+
+    const poll = async (): Promise<void> => {
+      const result = await fetchHubBootstrap()
+      if (cancelled) return
+      clearTimeout(timer)
+      if (result.kind === "signin") {
+        // Sign in on the hub console, which returns here. Once per short window: if the cookie cannot
+        // be kept (blocked storage), redirecting again would bounce the user forever.
+        let recent = false
+        try {
+          recent = Date.now() - Number(sessionStorage.getItem(HUB_SIGNIN_REDIRECT_KEY)) < 20_000
+          if (!recent) sessionStorage.setItem(HUB_SIGNIN_REDIRECT_KEY, String(Date.now()))
+        } catch {
+          recent = true
+        }
+        if (!recent) {
+          location.replace(`${import.meta.env.BASE_URL}hub/?next=${encodeURIComponent(`${location.pathname}${location.search}`)}`)
+          return
+        }
+        settle()
+        return
+      }
+      if (result.kind === "ready") {
+        detected = true
+        stopReporting ??= installClientErrorReporting({ post: postClientLogs(import.meta.env.BASE_URL), environment: clientEnvironment })
+        setMachines((current) => (sameHubMachines(current, result.machines) ? current : result.machines))
+        settle()
+        timer = setTimeout(() => void poll(), HUB_POLL_MS)
+        return
+      }
+      settle()
+      if (result.kind === "unavailable" && (detected || undetectedRetries < HUB_MAX_UNDETECTED_RETRIES)) {
+        // Could not tell. Never hold the app hostage to a hub that is not answering: it renders now and
+        // this asks again. A host that never proves to be a hub (offline PWA on GitHub Pages) gives up.
+        if (!detected) undetectedRetries += 1
+        timer = setTimeout(() => void poll(), HUB_RETRY_MS)
+      }
+      // `none` is definitive: this is not a hub.
+    }
+    void poll()
+
+    // iOS suspends a backgrounded page; refresh the machine list the moment it is visible again.
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !detected) return
+      clearTimeout(timer)
+      void poll()
+    }
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      clearTimeout(slowTimer)
+      document.removeEventListener("visibilitychange", onVisible)
+      stopReporting?.()
+    }
+  }, [enabled])
+
+  return { phase, machines, slow }
+}
+
 function HarnessRemoteBoundary() {
   const t = useTranslator()
   const [revision, setRevision] = useState(0)
   const persistedMachines = useMemo(loadWorkspaceMachines, [revision])
   const [localRuntime, setLocalRuntime] = useState<DesktopLocalRuntimeState | null>(null)
+  const hub = useHubMachines(!isDesktopPlatform() && !Capacitor.isNativePlatform())
   const machines = useMemo(() => {
     const local = localRuntimeMachine(localRuntime)
-    return local ? [local, ...persistedMachines.filter((machine) => !isDesktopLocalMachine(machine))] : persistedMachines
-  }, [localRuntime, persistedMachines])
+    const owned = [...(local ? [local] : []), ...hub.machines]
+    return owned.length ? [...owned, ...persistedMachines.filter((machine) => !isRuntimeOwnedMachine(machine))] : persistedMachines
+  }, [localRuntime, hub.machines, persistedMachines])
   const machinesRef = useRef(machines)
   machinesRef.current = machines
   const pairingInFlightRef = useRef(new Set<string>())
@@ -143,7 +231,7 @@ function HarnessRemoteBoundary() {
   const persistMachines = (nextMachines: WorkspaceMachine[]) => {
     // Runtime-owned machines are projections, not settings. Even an edit/remove attempt from a stale
     // manager surface cannot serialize them or replace the main-process profile.
-    const persistent = nextMachines.filter((machine) => !isDesktopLocalMachine(machine))
+    const persistent = nextMachines.filter((machine) => !isRuntimeOwnedMachine(machine))
     persistWorkspaceMachines(persistent)
     if (!isDesktopPlatform()) {
       setRevision((value) => value + 1)
@@ -214,6 +302,15 @@ function HarnessRemoteBoundary() {
   }
 
   if (desktopSyncError) throw desktopSyncError
+  if (hub.phase === "loading") {
+    // Blank at first: on a host that is not a hub the answer arrives in a blink, and flashing a
+    // "connecting" screen at every visitor would be noise. Words only appear if it is actually slow.
+    return (
+      <div className="uw-standalone-host" aria-busy="true">
+        {hub.slow ? <div className="hr-native-workspace-empty hr-native-startup connecting" role="status">Connecting…</div> : null}
+      </div>
+    )
+  }
   if (!desktopReady) {
     return (
       <div className="uw-standalone-host" aria-busy="true">

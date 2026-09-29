@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { ago, clip, installCommands, parseRoute, powershellQuote, proxyState, sessionTone, shellQuote } from "../public/util.js"
+import { ago, clip, installCommands, parseRoute, powershellQuote, proxyState, safeNext, sessionTone, shellQuote } from "../public/util.js"
 
 test("ago reads naturally at each scale and tolerates bad input", () => {
   const now = Date.parse("2026-06-01T12:00:00Z")
@@ -80,4 +80,20 @@ test("parseRoute", () => {
   assert.deepEqual(parseRoute("#/machines/machine_a%20b"), { name: "machine", id: "machine_a b" })
   assert.deepEqual(parseRoute("#/machines"), { name: "machines" })
   assert.deepEqual(parseRoute("#/bogus/x"), { name: "machines" })
+})
+
+test("safeNext only ever returns a same-origin path (no open redirect after sign-in)", () => {
+  assert.equal(safeNext("?next=%2F"), "/")
+  assert.equal(safeNext("?next=%2Fsome%2Fpath%3Fa%3D1"), "/some/path?a=1")
+  assert.equal(safeNext("?next=%2Fhubbub"), "/hubbub", "only /hub and /hub/... are excluded, not other prefixes")
+  for (const bad of [
+    "//evil.example", "/\\evil.example", "https://evil.example", "javascript:alert(1)", "evil.example", "", "/\r\nSet-Cookie:x", "/a\u0000b",
+    "/hub", "/hub/", "/hub/#/logs", "/hub?x=1"
+  ]) {
+    assert.equal(safeNext(`?next=${encodeURIComponent(bad)}`), null, bad)
+  }
+  assert.equal(safeNext("?next=%2F%250d%250a"), "/%0d%0a", "literal percent-text is just a same-origin path, not a header split")
+  assert.equal(safeNext(""), null)
+  assert.equal(safeNext("?other=1"), null)
+  assert.equal(safeNext(undefined), null)
 })
