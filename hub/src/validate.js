@@ -232,3 +232,24 @@ export function logEntries(value, now = Date.now()) {
   }
   return entries
 }
+
+const CLIENT_LEVELS = new Set(["debug", "info", "warn", "error"])
+
+/** Browser-side errors reported by the web app. Bounded hard: this endpoint is reachable from any page script. */
+export function clientLogEntries(value, now = Date.now()) {
+  if (!Array.isArray(value)) throw new ValidationError("entries must be an array")
+  if (value.length > 20) throw new ValidationError("at most 20 entries per batch")
+  return value.flatMap((entry) => {
+    const message = text(entry?.message, 2_000)
+    if (!message) return []
+    const strip = (candidate) => text(String(candidate ?? "").split(/[?#]/)[0], 300)
+    const line = JSON.stringify({
+      message,
+      ...(entry.stack ? { stack: text(entry.stack, 4_000) } : {}),
+      ...(entry.url ? { url: strip(entry.url) } : {}),
+      ...(entry.userAgent ? { userAgent: text(entry.userAgent, 300) } : {}),
+      ...(entry.context && typeof entry.context === "object" ? { context: scrubConfig(entry.context) } : {})
+    })
+    return [{ ts: now, level: CLIENT_LEVELS.has(entry.level) ? entry.level : "error", line: line.length > 8_192 ? line.slice(0, 8_192) : line }]
+  })
+}

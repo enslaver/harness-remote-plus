@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto"
+import http from "node:http"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { loadConfig } from "../src/config.js"
@@ -54,8 +55,8 @@ export async function createTestDatabase() {
 }
 
 /** Runs the real router on an ephemeral port and gives tests a tiny fetch wrapper with a cookie jar. */
-export async function startHub({ store, keys, config = testConfig(), sink, now } = {}) {
-  const { server } = createHub({ config, store, keys, sink, now })
+export async function startHub({ store, keys, config = testConfig(), sink, loki, prober, now } = {}) {
+  const { server, prober: activeProber } = createHub({ config, store, keys, sink, loki, prober, now })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   const base = `http://127.0.0.1:${server.address().port}`
   let cookie = ""
@@ -87,6 +88,7 @@ export async function startHub({ store, keys, config = testConfig(), sink, now }
   return {
     base,
     request,
+    prober: activeProber,
     async login(password = ADMIN_PASSWORD) {
       return request("/api/v1/auth/login", { method: "POST", json: { password } })
     },
@@ -109,4 +111,118 @@ export function machinePayload(overrides = {}) {
     config: { backend: "codex", roots: ["/home/me/dev"] },
     ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "machine"))
   }
+}
+
+async function listen(server) {
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
+  return `http://127.0.0.1:${server.address().port}`
+}
+
+async function readAll(request) {
+  const chunks = []
+  for await (const chunk of request) chunks.push(chunk)
+  return Buffer.concat(chunks)
+}
+
+/**
+ * Stands in for a machine's Harness gateway: Basic auth, the identity route, and a handful of
+ * behaviours the proxy has to survive (echo, streaming, uploads, a hung request, a rejected login).
+ */
+export async function startFakeMachine({ id = "machine_fake", username = "harness", password = "gateway-pass" } = {}) {
+  const requests = []
+  const sockets = new Set()
+  let streamsOpen = 0
+  let streamClosed = null
+  const closedSignal = () => new Promise((resolve) => { streamClosed = resolve })
+
+  const server = http.createServer(async (req, res) => {
+    const body = await readAll(req)
+    const record = { method: req.method, url: req.url, headers: req.headers, body: body.toString("utf8") }
+    requests.push(record)
+
+    const expected = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`
+    if (req.headers.authorization !== expected) {
+      res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Harness Remote Daemon"' })
+      res.end()
+      return
+    }
+    const url = new URL(req.url, "http://machine.local")
+    if (url.pathname === "/v1/machine") {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ machine: { id, name: "Fake machine" }, agents: [{ id: "codex", label: "Codex", state: "available" }] }))
+    } else if (url.pathname === "/echo") {
+      res.writeHead(200, { "Content-Type": "application/json", "X-Next-Cursor": "cursor-1", "Set-Cookie": "machine=1", "X-Internal": "secret" })
+      res.end(JSON.stringify(record))
+    } else if (url.pathname === "/sse") {
+      streamsOpen += 1
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" })
+      res.write(": connected\n\n")
+      let count = 0
+      const timer = setInterval(() => res.write(`event: tick\ndata: ${++count}\n\n`), 15)
+      // `res`, not `req`: the request body was already consumed above, so req's own 'close' has fired
+      // by now; only the response reports the client going away.
+      res.on("close", () => {
+        clearInterval(timer)
+        streamsOpen -= 1
+        streamClosed?.()
+      })
+    } else if (url.pathname === "/hang") {
+      // never answers
+    } else if (url.pathname === "/forbidden") {
+      res.writeHead(403)
+      res.end()
+    } else if (url.pathname === "/upload") {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ bytes: body.length }))
+    } else {
+      res.writeHead(404, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Not found" }))
+    }
+  })
+  server.on("connection", (socket) => {
+    sockets.add(socket)
+    socket.on("close", () => sockets.delete(socket))
+  })
+  const url = await listen(server)
+  return {
+    url,
+    id,
+    credentials: { username, password },
+    requests,
+    get streamsOpen() { return streamsOpen },
+    nextStreamClose: closedSignal,
+    async close() {
+      for (const socket of sockets) socket.destroy()
+      await new Promise((resolve) => server.close(resolve))
+    }
+  }
+}
+
+/** A Loki that records pushes and serves canned query results; `mode` simulates outages and rejections. */
+export async function startFakeLoki() {
+  const state = { pushes: [], queries: [], mode: "ok", result: [] }
+  const server = http.createServer(async (req, res) => {
+    const url = new URL(req.url, "http://loki.local")
+    if (url.pathname === "/ready") {
+      res.writeHead(state.mode === "down" ? 503 : 200)
+      res.end(state.mode === "down" ? "not ready" : "ready")
+    } else if (url.pathname === "/loki/api/v1/push") {
+      const body = await readAll(req)
+      if (state.mode === "down") { res.writeHead(503); res.end("unavailable"); return }
+      if (state.mode === "reject") { res.writeHead(400); res.end("entry has timestamp too old"); return }
+      state.pushes.push(JSON.parse(body.toString("utf8")))
+      res.writeHead(204)
+      res.end()
+    } else if (url.pathname === "/loki/api/v1/query_range") {
+      state.queries.push(Object.fromEntries(url.searchParams))
+      if (state.mode === "down") { res.writeHead(503); res.end("unavailable"); return }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ status: "success", data: { resultType: "streams", result: state.result } }))
+    } else {
+      res.writeHead(404)
+      res.end()
+    }
+  })
+  const url = await listen(server)
+  return { url, state, close: () => new Promise((resolve) => { server.closeAllConnections?.(); server.close(resolve) }) }
 }

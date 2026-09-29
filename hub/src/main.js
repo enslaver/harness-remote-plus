@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url"
 import { ConfigError, loadConfig } from "./config.js"
 import { SecretBox, deriveKeys } from "./crypto.js"
 import { createPool, migrate } from "./db.js"
+import { LokiSink, nullSink } from "./events.js"
+import { LokiClient } from "./loki.js"
 import { createHub } from "./server.js"
 import { Store } from "./store.js"
 
@@ -30,7 +32,12 @@ async function main() {
   await migrate(pool, resolved.migrationsDir, { log })
   const store = new Store(pool, new SecretBox(keys.secretbox))
 
-  const { server } = createHub({ config: resolved, store, keys })
+  const loki = config.lokiUrl ? new LokiClient({ url: config.lokiUrl }) : undefined
+  const sink = loki ? new LokiSink({ loki, log }) : nullSink
+  if (!loki) log("HUB_LOKI_URL is not set: log collection and the logs view are disabled")
+
+  const { server, prober } = createHub({ config: resolved, store, keys, sink, loki })
+  prober.start()
   await new Promise((resolve, reject) => {
     server.once("error", reject)
     server.listen(config.port, config.host, resolve)
@@ -48,6 +55,7 @@ async function main() {
     closing = true
     log(`${signal} received, shutting down`)
     clearInterval(retention)
+    prober.stop()
     server.close(() => store.close().finally(() => process.exit(0)))
     server.closeAllConnections?.()
     setTimeout(() => process.exit(1), 10_000).unref()

@@ -1,22 +1,20 @@
 import http from "node:http"
 import { AdminAuth, AttemptThrottle } from "./auth.js"
 import { generateToken, hashToken, safeEqual } from "./crypto.js"
+import { nullSink } from "./events.js"
+import { parseTime } from "./loki.js"
 import {
   HttpError, Router, bearerToken, clientAddress, isSafeMethod, isSameSiteRequest, publicUrl, readJson, sendError, sendJson
 } from "./http.js"
 import { bootstrapMachine, publicMachine, publicSession } from "./present.js"
+import { Prober } from "./prober.js"
+import { createMachineProxy, parseProxyPath } from "./proxy.js"
 import {
-  ValidationError, agentList, configObject, credentialsObject, endpointList, machineInfo, sessionList, statsObject
+  ValidationError, agentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
 } from "./validate.js"
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
 const VERSION = "0.1.0"
-
-/** Receives the things worth recording in Loki. The default drops them; main.js wires the real sink. */
-export const nullSink = Object.freeze({
-  async machineEvent() {},
-  async sessionTransitions() {}
-})
 
 function limit(value, fallback, max) {
   const parsed = Number(value)
@@ -36,12 +34,15 @@ function validated(work) {
  * Builds the HTTP surface. Dependencies are injected so tests can run the real router against a real
  * database without any process-level state.
  */
-export function createHub({ config, store, auth, keys, sink = nullSink, now = () => Date.now() }) {
+export function createHub({ config, store, auth, keys, sink = nullSink, loki, prober, now = () => Date.now() }) {
   const adminAuth = auth ?? new AdminAuth({ config, keys, now })
   const loginThrottle = new AttemptThrottle({ max: 10, windowMs: 5 * 60_000, now })
   // Failed enrollment tokens and failed machine tokens share one budget per address.
   const machineThrottle = new AttemptThrottle({ max: 20, windowMs: 5 * 60_000, now })
+  const clientLogThrottle = new AttemptThrottle({ max: 120, windowMs: 60_000, now })
   const router = new Router()
+  const activeProber = prober ?? new Prober({ store, sink, config })
+  const proxy = createMachineProxy({ store, config, sink, prober: activeProber, log: (message) => process.stderr.write(`[hub] ${message}\n`) })
   const presentOptions = () => ({ offlineAfterMs: config.offlineAfterMs, now: now() })
 
   /** Browser/admin routes. No WWW-Authenticate header: the SPA handles 401 itself, never a native prompt. */
@@ -78,6 +79,8 @@ export function createHub({ config, store, auth, keys, sink = nullSink, now = ()
       await store.ping()
       checks.database = true
     } catch {}
+    // Loki is optional, but if it is configured a dead one is worth surfacing (logs would be lost).
+    if (loki) checks.loki = await loki.ready()
     const ok = Object.values(checks).every((value) => value !== false)
     sendJson(res, ok ? 200 : 503, { ok, checks })
   })
@@ -205,6 +208,22 @@ export function createHub({ config, store, auth, keys, sink = nullSink, now = ()
     })
   }))
 
+  router.add("POST", "/api/v1/ingest/logs", machine(async ({ req, res, machine: row }) => {
+    // 501, not a silent 204: the machine needs to know shipping can never succeed and stop buffering.
+    if (!loki) throw new HttpError(501, "logs_disabled", "This hub has no Loki configured")
+    const body = await readJson(req, 2 * 1024 * 1024)
+    const entries = validated(() => logEntries(body.entries, now()))
+    if (!entries.length) return sendJson(res, 200, { accepted: 0 })
+    try {
+      sendJson(res, 200, { accepted: await sink.ingestLogs(row, entries) })
+    } catch (error) {
+      // Retryable failures (Loki down/overloaded) tell the machine to keep its buffer; a rejected
+      // batch (4xx) would fail forever, so it is acknowledged and dropped rather than wedging the queue.
+      if (error?.retryable === false) return sendJson(res, 200, { accepted: 0, dropped: entries.length, reason: error.message })
+      throw new HttpError(503, "logs_unavailable", "Log storage is unavailable; retry later", { "Retry-After": "15" })
+    }
+  }))
+
   // ---- admin API ----------------------------------------------------------------------------
 
   router.add("GET", "/api/v1/stats", admin(async ({ res }) => sendJson(res, 200, await store.stats())))
@@ -242,6 +261,58 @@ export function createHub({ config, store, auth, keys, sink = nullSink, now = ()
     if (!row || !(await store.deleteMachine(params.id))) throw new HttpError(404, "not_found", "Unknown machine")
     await sink.machineEvent(row, "machine.removed", {})
     sendJson(res, 200, { ok: true })
+  }))
+
+  router.add("POST", "/api/v1/machines/:id/probe", admin(async ({ res, params }) => {
+    if (!(await store.getMachine(params.id))) throw new HttpError(404, "not_found", "Unknown machine")
+    sendJson(res, 200, await activeProber.probeMachine(params.id))
+  }))
+
+  router.add("GET", "/api/v1/logs", admin(async ({ res, url }) => {
+    if (!loki) throw new HttpError(501, "logs_disabled", "This hub has no Loki configured")
+    const params = url.searchParams
+    const current = now()
+    let start
+    let end
+    try {
+      start = parseTime(params.get("since"), current, current - 3_600_000)
+      end = parseTime(params.get("until"), current, current)
+    } catch (error) {
+      throw new HttpError(400, "invalid_query", error.message)
+    }
+    if (end <= start) throw new HttpError(400, "invalid_query", "until must be after since")
+    if (current - start > 31 * 86_400_000) throw new HttpError(400, "invalid_query", "since is beyond the 31-day retention")
+    const filters = { machine_id: params.get("machine"), kind: params.get("kind"), source: params.get("source"), level: params.get("level"), stream: params.get("stream") }
+    try {
+      const entries = await loki.query({
+        filters,
+        contains: (params.get("q") || "").slice(0, 200) || undefined,
+        start,
+        end,
+        limit: limit(params.get("limit"), 200, 1_000),
+        direction: params.get("direction") === "forward" ? "forward" : "backward"
+      })
+      sendJson(res, 200, { entries })
+    } catch (error) {
+      if (error instanceof RangeError) throw new HttpError(400, "invalid_query", error.message)
+      throw new HttpError(502, "logs_unavailable", "Log storage did not answer")
+    }
+  }))
+
+  router.add("POST", "/api/v1/client-logs", admin(async ({ req, res }) => {
+    if (!loki) return sendJson(res, 202, { accepted: 0 })
+    const address = clientAddress(req, config.trustProxy)
+    const wait = clientLogThrottle.retryAfter(address)
+    if (wait) throw new HttpError(429, "too_many_requests", "Slow down", { "Retry-After": String(wait) })
+    clientLogThrottle.fail(address)
+    const body = await readJson(req, 64 * 1024)
+    const entries = validated(() => clientLogEntries(body.entries, now()))
+    try {
+      if (entries.length) await sink.clientLogs(entries)
+    } catch {
+      throw new HttpError(503, "logs_unavailable", "Log storage is unavailable")
+    }
+    sendJson(res, 202, { accepted: entries.length })
   }))
 
   router.add("GET", "/api/v1/sessions", admin(async ({ res, url }) => {
@@ -287,7 +358,23 @@ export function createHub({ config, store, auth, keys, sink = nullSink, now = ()
 
   const server = http.createServer(async (req, res) => {
     try {
-      const url = new URL(req.url ?? "/", "http://hub.local")
+      const target = req.url ?? "/"
+      // Concatenate rather than resolve: `new URL("//x/y", base)` would read a leading "//" as a host.
+      if (!target.startsWith("/")) throw new HttpError(400, "bad_request", "Unsupported request target")
+      const url = new URL(`http://hub.local${target}`)
+
+      const proxied = url.pathname.startsWith("/m/") ? parseProxyPath(url.pathname) : null
+      if (proxied) {
+        const session = adminAuth.authenticate(req)
+        if (!session) throw new HttpError(401, "unauthenticated", "Sign in required")
+        if (!isSafeMethod(req.method ?? "GET") && !isSameSiteRequest(req, config)) {
+          throw new HttpError(403, "cross_site_request", "Cross-site requests are not allowed")
+        }
+        if (session.refresh) res.setHeader("Set-Cookie", session.refresh)
+        await proxy({ req, res, url, ...proxied })
+        return
+      }
+
       const match = router.match(req.method ?? "GET", url.pathname)
       if (!match) throw new HttpError(404, "not_found", "Not found")
       await match.handler({ req, res, url, params: match.params })
@@ -298,7 +385,7 @@ export function createHub({ config, store, auth, keys, sink = nullSink, now = ()
   })
   server.on("clientError", (_error, socket) => socket.end("HTTP/1.1 400 Bad Request\r\n\r\n"))
 
-  return { server, router, auth: adminAuth }
+  return { server, router, auth: adminAuth, prober: activeProber }
 }
 
 function presentToken(row) {
