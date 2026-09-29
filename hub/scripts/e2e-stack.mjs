@@ -144,6 +144,8 @@ try {
   check("machine: it appears on the hub after one command", Boolean(machine?.id))
   const detail = async () => (await api(`/api/v1/machines/${encodeURIComponent(id)}`)).json
 
+  // Enrollment registers the machine; agents and configuration arrive with its first heartbeat.
+  machine = await until("the first heartbeat", async () => (await api("/api/v1/machines")).json?.machines?.find((candidate) => candidate.id === id && candidate.agents?.length), { timeoutMs: 30_000 })
   check("machine: identity, agents and configuration are reported", machine.status === "online" && machine.agents.some((agent) => agent.id === "omp") && machine.config.backend === "omp")
   check("secrets: the gateway password is nowhere in what the hub reports", !JSON.stringify(await detail()).includes(gatewayPassword))
   const listedTokens = JSON.stringify((await api("/api/v1/enrollment-tokens")).json)
@@ -177,11 +179,11 @@ try {
   const created = await api(`/m/${encodeURIComponent(id)}/session?directory=${encodeURIComponent(work)}`, { method: "POST", json: { title: "e2e session" } })
   check("sessions: a Session can be created on the machine through the hub", created.status === 200 && Boolean(created.json?.id), `${created.status} ${created.text.slice(0, 120)}`)
   const inventory = await until("the Session to be inventoried", async () => {
-    const response = await api(`/api/v1/sessions?machine=${encodeURIComponent(id)}&limit=50`)
+    const response = await api(`/api/v1/sessions?machine=${encodeURIComponent(id)}&agent=omp&limit=50`)
     return response.json?.sessions?.length ? response.json.sessions : null
   }, { timeoutMs: 45_000 })
   check("sessions: the hub's inventory lists it, with its machine and agent", inventory.some((session) => session.machineId === id && session.agentId === "omp"), JSON.stringify(inventory[0]))
-  const sample = inventory.find((session) => session.machineId === id)
+  const sample = inventory.find((session) => session.machineId === id && session.agentId === "omp")
   check("sessions: it has an activity, a start time and a last-ran time", ["working", "needs_input", "idle", "completed", "failed", "stopped", "unknown"].includes(sample?.activity) && Number.isFinite(Date.parse(sample?.startedAt)) && (sample?.lastRanAt === null || Number.isFinite(Date.parse(sample?.lastRanAt))), JSON.stringify(sample))
   const recentSearch = (await api(`/api/v1/sessions?machine=${encodeURIComponent(id)}&startedAfter=1h&q=${encodeURIComponent("e2e")}`)).json
   check("sessions: the hub can search by when it started, and by text", recentSearch.total >= 1 && recentSearch.sessions.some((session) => session.id === sample.id), JSON.stringify(recentSearch).slice(0, 200))
@@ -192,7 +194,10 @@ try {
     return response.json?.entries?.length ? response.json.entries : null
   }, { timeoutMs: 30_000 })
   check("sessions: its creation is an event in Loki", sessionEvents.length >= 1)
-  const agentLogs = (await api(`/api/v1/logs?machine=${encodeURIComponent(id)}&source=omp&since=15m`)).json.entries
+  const agentLogs = await until("the agent's own output in Loki", async () => {
+    const response = await api(`/api/v1/logs?machine=${encodeURIComponent(id)}&source=omp&since=15m`)
+    return response.json?.entries?.length ? response.json.entries : null
+  }, { timeoutMs: 30_000 }).catch(() => [])
   check("logs: the agent's own output is labelled by source", agentLogs.some((entry) => /ready to serve sessions/.test(entry.line)), `${agentLogs.length} lines`)
 
   // ---- 6. durability and self-healing ---------------------------------------------------------------------

@@ -214,3 +214,17 @@ test("'claude' is never called complete when only the background list was seen",
     await gateway.close()
   }
 })
+
+test("a slow or hung background-agent listing does not delay the rest of the inventory for long", async () => {
+  const calls = []
+  const request = async (url, options) => {
+    calls.push({ url, timeoutMs: options.timeoutMs })
+    if (url.includes("/v1/background-agents")) throw Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })
+    if (url.endsWith("/experimental/session")) return { status: 200, json: [{ id: "s", status: "idle" }], headers: {} }
+    return { status: 200, json: {}, headers: {} }
+  }
+  const { sessions } = await collectSessions({ config, agents: [{ id: "omp", state: "available" }], scoped: false, request })
+  assert.deepEqual(sessions.map((session) => session.id), ["s"], "the ordinary Sessions are still reported")
+  const background = calls.find((call) => call.url.includes("/v1/background-agents"))
+  assert.ok(background.timeoutMs <= 3_000, `the background listing may take at most 3 s, not ${background.timeoutMs} ms`)
+})

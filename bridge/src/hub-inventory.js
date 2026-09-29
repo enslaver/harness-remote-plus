@@ -2,6 +2,7 @@ import { requestJson } from "./http-json.js"
 
 const MAX_SESSIONS_PER_AGENT = 200
 const REQUEST_TIMEOUT_MS = 5_000
+const BACKGROUND_REQUEST_TIMEOUT_MS = 3_000
 
 function basic(username, password) {
   return username ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`, "utf8").toString("base64")}` } : {}
@@ -116,7 +117,9 @@ export async function collectSessions({ config, agents, scoped, request = reques
  */
 async function collectClaudeAgents({ base, headers, request }) {
   try {
-    const response = await request(`${base}/v1/background-agents?all=1`, { headers, timeoutMs: REQUEST_TIMEOUT_MS })
+    // A hung `claude` CLI must not hold up the heartbeat: the machine would look offline. Give up quickly and report
+    // the ordinary Sessions; the agents show up on the next beat.
+    const response = await request(`${base}/v1/background-agents?all=1`, { headers, timeoutMs: BACKGROUND_REQUEST_TIMEOUT_MS })
     if (response.status !== 200 || !response.json?.available || !Array.isArray(response.json.agents)) return undefined
     const sessions = []
     for (const agent of response.json.agents.slice(0, MAX_SESSIONS_PER_AGENT)) {
