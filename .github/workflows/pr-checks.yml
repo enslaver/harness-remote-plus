@@ -147,6 +147,170 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # The hub is a separate deployable with its own tests. Its integration suites need a real Postgres (and,
+  # for the client round-trip, a real Loki); `ci-guard.test.js` fails the job if the database is missing,
+  # so a misconfigured service container can never turn this into a silent pass.
+  hub:
+    name: Hub tests (Postgres + Loki)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hub
+          POSTGRES_PASSWORD: hub
+          POSTGRES_DB: hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hub -d hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      HUB_TEST_DATABASE_URL: postgres://hub:hub@127.0.0.1:5432/hub
+      HUB_TEST_LOKI_URL: http://127.0.0.1:3100
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: hub/package-lock.json
+
+      - name: Install hub dependencies
+        run: npm ci
+        working-directory: hub
+
+      # Same image and config the compose stack ships, so the client is proven against the real thing.
+      - name: Start Loki
+        run: |
+          docker run -d --name loki -p 3100:3100 \
+            -v "$GITHUB_WORKSPACE/deploy/loki/loki-config.yml:/etc/loki/config.yml:ro" \
+            grafana/loki:3.4.2 -config.file=/etc/loki/config.yml
+          for attempt in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3100/ready | grep -q ready && exit 0
+            sleep 2
+          done
+          docker logs loki
+          exit 1
+
+      - name: Run hub tests
+        run: npm test
+        working-directory: hub
+
+  # Drives the hub console and the real built web app in Chromium with an iPhone profile. This is
+  # emulation (Chromium's engine, Apple's viewport/touch/user agent), not Safari: it catches layout,
+  # sizing, CSP and script errors and proves the sign-in -> hub machines -> proxy path, not WebKit quirks.
+  hub-browser:
+    name: Hub console and app on an iPhone profile
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hub
+          POSTGRES_PASSWORD: hub
+          POSTGRES_DB: hub
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hub -d hub"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      HUB_TEST_DATABASE_URL: postgres://hub:hub@127.0.0.1:5432/hub
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            hub/package-lock.json
+
+      - name: Install web dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Build the web app the hub serves
+        run: npm run build
+        working-directory: web
+
+      - name: Install hub dependencies
+        run: npm ci
+        working-directory: hub
+
+      - name: Install pinned Playwright runtime
+        run: npm install --no-save --package-lock=false playwright@1.55.0
+        working-directory: hub
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: hub
+
+      - name: Run hub console smoke (iPhone, landscape, dark, desktop)
+        run: node scripts/ui-smoke.mjs
+        working-directory: hub
+
+      - name: Run app-through-hub smoke (sign-in, hub machines, proxy, keyboard, service worker)
+        run: node scripts/app-smoke.mjs
+        working-directory: hub
+
+      - name: Upload browser screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hub-browser-${{ github.event.pull_request.head.sha || github.sha }}
+          path: hub/browser-artifacts/*.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The whole product as a user runs it: `docker compose up`, then a REAL machine daemon pointed at it
+  # with one command. Includes the Grafana profile and the Caddy TLS profile.
+  hub-stack:
+    name: Hub stack end-to-end (Docker Compose)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Generate a private .env (the same command a user runs for HTTPS)
+        run: sh deploy/init-env.sh --domain localhost > /dev/null
+
+      - name: Build the hub image
+        run: docker compose --profile grafana --profile tls build
+
+      - name: Start the stack
+        run: docker compose --profile grafana --profile tls up -d --wait --wait-timeout 240
+
+      - name: Run end-to-end checks
+        run: node hub/scripts/e2e-stack.mjs
+        env:
+          E2E_GRAFANA: "1"
+          HUB_TLS_URL: https://localhost
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose --profile grafana --profile tls logs --no-color --tail 200
+
+      - name: Tear down
+        if: always()
+        run: docker compose --profile grafana --profile tls down -v
+
   apk:
     name: Debug APK
     needs: [tests, bridge-platforms, browser-smoke]

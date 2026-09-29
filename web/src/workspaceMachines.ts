@@ -3,6 +3,8 @@ import type { ServerConfig } from "./types"
 
 export const WORKSPACE_MACHINES_STORAGE_KEY = "harness-remote.workspace.machines.v1"
 export const DESKTOP_LOCAL_MACHINE_ID = "desktop-local-runtime"
+/** Machines a hub lists are projected into the workspace under this id prefix and never stored. */
+export const HUB_MACHINE_ID_PREFIX = "hub:"
 
 export type WorkspaceMachine = {
   id: string
@@ -16,6 +18,18 @@ function machineID(): string {
 
 export function isDesktopLocalMachine(machine: Pick<WorkspaceMachine, "id">): boolean {
   return machine.id === DESKTOP_LOCAL_MACHINE_ID
+}
+
+export function isHubMachine(machine: Pick<WorkspaceMachine, "id">): boolean {
+  return machine.id.startsWith(HUB_MACHINE_ID_PREFIX)
+}
+
+/**
+ * A machine whose configuration belongs to something other than the user's saved list: the desktop
+ * app's own runtime, or a hub. Neither is persisted, edited or removed from here; the owner decides.
+ */
+export function isRuntimeOwnedMachine(machine: Pick<WorkspaceMachine, "id">): boolean {
+  return isDesktopLocalMachine(machine) || isHubMachine(machine)
 }
 
 function normalizeMachine(value: unknown): WorkspaceMachine | null {
@@ -38,7 +52,9 @@ function normalizeMachine(value: unknown): WorkspaceMachine | null {
   if (!normalized) return null
 
   const id = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id.trim() : machineID()
-  if (id === DESKTOP_LOCAL_MACHINE_ID) return null
+  // Runtime-owned ids are never valid in storage: a stale or hand-edited entry must not be able to
+  // masquerade as (or shadow) a machine the runtime or the hub owns.
+  if (id === DESKTOP_LOCAL_MACHINE_ID || id.startsWith(HUB_MACHINE_ID_PREFIX)) return null
   return {
     id,
     name: typeof candidate.name === "string" && candidate.name.trim()
@@ -69,7 +85,7 @@ export function loadWorkspaceMachines(): WorkspaceMachine[] {
 
 export function persistWorkspaceMachines(machines: WorkspaceMachine[]): void {
   const normalized = machines.flatMap((machine) => {
-    if (isDesktopLocalMachine(machine)) return []
+    if (isRuntimeOwnedMachine(machine)) return []
     const next = normalizeMachine(machine)
     return next ? [next] : []
   })

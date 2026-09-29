@@ -8,6 +8,11 @@ export type ServerConfig = {
   password: string
   /** Present when this profile targets one agent exposed by a Harness machine daemon. */
   agentId?: string
+  /**
+   * Path the machine is served under on `host:port`, e.g. `/m/machine_abc` when a Harness Remote Hub
+   * proxies it. Empty/absent for a machine reached directly. Never carries a query or fragment.
+   */
+  basePath?: string
 }
 
 export type HarnessCapabilities = {

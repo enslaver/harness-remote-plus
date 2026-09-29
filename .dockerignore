@@ -1,0 +1,22 @@
+# Keep the build context small and free of local state. The images copy only what they name.
+.git
+.github
+**/node_modules
+**/.DS_Store
+.env
+.env.*
+!.env.example
+deploy/data
+
+web/dist
+web/dist-electron
+web/release
+web/release-*
+web/android
+web/browser-artifacts
+web/*.tsbuildinfo
+hub/browser-artifacts
+
+docs
+bridge
+*.tgz

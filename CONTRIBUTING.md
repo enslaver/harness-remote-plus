@@ -19,6 +19,8 @@ if you are having an agent do the work.
 | `web/electron/` | Main/preload shell, IPC contract, profile registry, HTTP and SSE transports |
 | `web/native-android/` | Java sources copied into generated Android project — see [Android packaging](#android-packaging) |
 | `bridge/` | Local HTTP/SSE server translating app API to ACP over stdio, for OMP, PI, Claude Code and Codex CLI |
+| `hub/` | Optional self-hosted server: machine registry (Postgres), log collection (Loki), same-origin proxy for the web app, admin console. One dependency (`pg`). See [docs/HUB.md](docs/HUB.md) |
+| `deploy/`, `docker-compose.yml` | The hub's Docker stack: Loki, Grafana and Caddy configuration and the `.env` bootstrap script |
 | `.github/workflows/` | Cloud APK/AAB and Windows/macOS/Linux Electron builds |
 
 ## Prerequisites
@@ -87,6 +89,18 @@ npm run test:ci:full
 
 cd ../bridge
 npm test
+```
+
+Touching `hub/`, `deploy/`, `docker-compose.yml`, the bridge's hub reporter or the web client's hub/iPhone code
+adds these (CI runs all of them; the database suites need a Postgres and skip without one locally, but fail in CI):
+
+```bash
+cd hub && npm ci
+HUB_TEST_DATABASE_URL=postgres://hub:hub@127.0.0.1:5432/hub npm test   # add HUB_TEST_LOKI_URL=… for real Loki
+npm run smoke:ui && npm run smoke:app     # console + built web app in Chromium with an iPhone profile (needs web/dist)
+
+cd .. && sh deploy/init-env.sh && docker compose up -d --build --wait
+node hub/scripts/e2e-stack.mjs            # a real machine daemon against the real stack
 ```
 
 `npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles. Packaging workflows

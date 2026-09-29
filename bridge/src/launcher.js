@@ -6,6 +6,7 @@ import { networkInterfaces } from "node:os"
 import path from "node:path"
 import { spawn } from "node:child_process"
 import { fileURLToPath } from "node:url"
+import { HUB_USAGE } from "./hub-options.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
 
 const BACKEND_EXECUTABLES = {
@@ -246,7 +247,7 @@ export function formatStartupSummary({ plan, addresses, port, username, password
 }
 
 export function launcherUsage() {
-  return `Usage: harness-remote [options]\n\nQuick start options:\n  --backend <name>       Select omp, pi, claude, codex, or opencode (on multi-agent machines, selects the daemon primary)\n  --single               Force the legacy single-backend path instead of the machine daemon\n  --host <host>          Bind host (quick-start default: 0.0.0.0)\n  --port <port>          Preferred port (OpenCode single-host default: 4096; daemon/ACP default: 4097)\n  --username <username>  Override generated Basic Auth username\n  --password <password>  Override generated Basic Auth password\n  --cors <origin>        Allow a browser client from this exact origin; repeatable\n  --help                 Show this help\n\nWith one detected agent, Harness starts the existing single-backend path. With multiple detected agents and at least one ACP backend, it starts the machine daemon automatically and exposes every detected ACP harness through the machine endpoint; OpenCode is included when installed and receives a free loopback port automatically.`
+  return `Usage: harness-remote [options]\n\nQuick start options:\n  --backend <name>       Select omp, pi, claude, codex, or opencode (on multi-agent machines, selects the daemon primary)\n  --single               Force the legacy single-backend path instead of the machine daemon\n  --host <host>          Bind host (quick-start default: 0.0.0.0)\n  --port <port>          Preferred port (OpenCode single-host default: 4096; daemon/ACP default: 4097)\n  --username <username>  Override generated Basic Auth username\n  --password <password>  Override generated Basic Auth password\n  --cors <origin>        Allow a browser client from this exact origin; repeatable\n  --help                 Show this help\n\n${HUB_USAGE}\n\nWith one detected agent, Harness starts the existing single-backend path. With multiple detected agents and at least one ACP backend, it starts the machine daemon automatically and exposes every detected ACP harness through the machine endpoint; OpenCode is included when installed and receives a free loopback port automatically.`
 }
 
 export async function startManagedOpenCode({ host, port, username, password, command = "opencode", Host = ManagedOpenCodeHost } = {}) {
@@ -347,6 +348,10 @@ async function main() {
   }
 
   if (backend === "opencode") {
+    if (hasOption(args, "--hub") || process.env.HARNESS_REMOTE_HUB_URL) {
+      // This path runs `opencode serve` directly, with no gateway process of ours to report from.
+      process.stderr.write("\nNote: hub reporting is not available in OpenCode-only single mode; continuing without the hub.\n")
+    }
     process.stdout.write("\nStarting OpenCode...\n")
     const managed = await startManagedOpenCode({ host, port, username, password })
     process.stdout.write("Harness Remote is ready. Keep this terminal open while you use it.\n")

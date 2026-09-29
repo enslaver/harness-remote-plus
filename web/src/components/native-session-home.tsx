@@ -60,6 +60,7 @@ export function NativeSessionHome(props: Props) {
     machine.id,
     machine.config.host,
     machine.config.port,
+    machine.config.basePath || "",
     machine.config.username,
     machine.config.password,
     state,

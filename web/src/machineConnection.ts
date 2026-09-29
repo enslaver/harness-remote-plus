@@ -11,4 +11,6 @@ export function sameMachineConnection(left: ServerConfig, right: ServerConfig): 
     && left.username === right.username
     && left.password === right.password
     && (left.agentId?.trim() || "") === (right.agentId?.trim() || "")
+    // Two machines behind one hub share host and port and differ only here.
+    && (left.basePath?.trim() || "") === (right.basePath?.trim() || "")
 }

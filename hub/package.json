@@ -1,0 +1,21 @@
+{
+  "name": "harness-remote-hub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted hub for Harness Remote: web UI, machine registry (Postgres), log and session-event collection (Loki).",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test --test-concurrency=4 \"test/*.test.js\"",
+    "e2e": "node scripts/e2e-stack.mjs",
+    "smoke:ui": "node scripts/ui-smoke.mjs",
+    "smoke:app": "node scripts/app-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "pg": "8.23.0"
+  }
+}

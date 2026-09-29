@@ -41,7 +41,8 @@ import type { MachineSnapshot, Session } from "../types"
 import { subscribeTaskDeskLiveEvents } from "../taskdesk-live-events"
 import {
   createWorkspaceMachine,
-  isDesktopLocalMachine,
+  isHubMachine,
+  isRuntimeOwnedMachine,
   type WorkspaceMachine
 } from "../workspaceMachines"
 import { sameMachineConnection } from "../machineConnection"
@@ -215,7 +216,7 @@ function MachineManager({
   const draft = useMemo(() => {
     if (editingID === "new") return createWorkspaceMachine()
     const machine = machines.find((candidate) => candidate.id === editingID)
-    return machine && !isDesktopLocalMachine(machine) ? machine : null
+    return machine && !isRuntimeOwnedMachine(machine) ? machine : null
   }, [editingID, machines])
 
   const probeMachine = useCallback((machine: WorkspaceMachine) => {
@@ -268,7 +269,7 @@ function MachineManager({
   }, [pairingSuccessRevision, pairingSuccessMachineName])
 
   const save = (machine: WorkspaceMachine) => {
-    if (isDesktopLocalMachine(machine)) return
+    if (isRuntimeOwnedMachine(machine)) return
     if (editingID === "new") {
       onPersist([...machines, machine])
       setCompletionMachineName(machine.name)
@@ -281,7 +282,7 @@ function MachineManager({
   // window.confirm is a blocking native dialog that the Android WebView renders as a bare,
   // unstyled system alert on top of the app. An inline confirmation stays inside the product.
   const remove = (machine: WorkspaceMachine) => {
-    if (isDesktopLocalMachine(machine)) return
+    if (isRuntimeOwnedMachine(machine)) return
     onPersist(machines.filter((candidate) => candidate.id !== machine.id))
     setConfirmRemoveID(null)
     if (editingID === machine.id) setEditingID(null)
@@ -334,13 +335,13 @@ function MachineManager({
             const state = check?.state || "checking"
             const snapshot = check?.snapshot
             const error = check?.state === "offline" ? check.error : undefined
-            const runtimeOwned = isDesktopLocalMachine(machine)
+            const runtimeOwned = isRuntimeOwnedMachine(machine)
             return (
               <div className="uw-machine-config-card" data-machine-state={state} data-runtime-owned={runtimeOwned || undefined} key={machine.id}>
                 <div className="uw-machine-config-main">
                   <strong>{snapshot?.machine.name || machine.name}</strong>
-                  {runtimeOwned ? <small className="uw-machine-runtime-owned">Managed by Harness Remote</small> : null}
-                  <span>{machine.config.host}:{machine.config.port}</span>
+                  {runtimeOwned ? <small className="uw-machine-runtime-owned">{isHubMachine(machine) ? "Managed by your hub" : "Managed by Harness Remote"}</small> : null}
+                  {isHubMachine(machine) ? null : <span>{machine.config.host}:{machine.config.port}</span>}
                   <small className={`uw-machine-connection-state ${state}`} aria-live="polite">
                     <i aria-hidden="true" />
                     {state === "checking"
@@ -636,7 +637,7 @@ function NativeSessionsWorkspace({
   // Endpoint identity, not array identity: the parent rebuilds the machine list on every persist,
   // and re-subscribing on each render would tear down healthy streams.
   const streamEndpoints = machines
-    .map((machine) => [machine.id, machine.config.host, machine.config.port, machine.config.username, machine.config.password, machine.config.agentId || ""].join("\u0000"))
+    .map((machine) => [machine.id, machine.config.host, machine.config.port, machine.config.basePath || "", machine.config.username, machine.config.password, machine.config.agentId || ""].join("\u0000"))
     .join("\u0001")
   const streamTargets = useMemo(
     () => machines.map((machine) => ({ id: machine.id, config: machine.config })),

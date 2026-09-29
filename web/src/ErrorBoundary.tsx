@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react"
+import { reportClientError } from "./clientLog"
 
 type Props = {
   children: ReactNode
@@ -22,6 +23,8 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("Harness Remote crashed", error, info.componentStack)
+    // On a hub this leaves a record in its log store; anywhere else it is a no-op.
+    reportClientError(error, { componentStack: info.componentStack?.slice(0, 2_000), boundary: true })
   }
 
   #resetSettings = () => {

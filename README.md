@@ -86,6 +86,23 @@ npx harness-remote --cors http://localhost:5173
 
 See the [Quick start guide](docs/QUICK_START.md) for advanced options and troubleshooting.
 
+### Hub: one address for every machine (optional)
+
+Run the **hub** on a home server or VPS and every computer you install can register with it. It hosts the web UI (including a layout that works on iPhone), keeps a Postgres registry of your machines and their Sessions, and sends each machine's logs to [Loki](https://grafana.com/oss/loki/).
+
+```bash
+./deploy/init-env.sh          # writes .env with fresh secrets
+docker compose up -d --build  # hub + Postgres + Loki, on http://127.0.0.1:8080
+```
+
+Then, on each computer you want to add, use the command the hub console shows you:
+
+```bash
+npx harness-remote --hub https://hub.example.com --hub-token hre_…
+```
+
+The hub URL is remembered, so the next `npx harness-remote` reports again on its own. Machines stay in control of their own credentials; the hub proxies browser traffic to them and never hands the machine password to the browser. See [docs/HUB.md](docs/HUB.md) for HTTPS (needed for iPhone home-screen installs), Grafana, security and operations.
+
 ## What it gives you
 
 - **Native Sessions** — existing Sessions remain owned by Codex, Claude, OpenCode, OMP or PI.
@@ -193,6 +210,7 @@ npm run electron:dev
 ## Documentation
 
 - [Quick start](docs/QUICK_START.md)
+- [Hub: Docker stack, registry and logs](docs/HUB.md)
 - [Architecture and roadmap](docs/HARNESS_3_ROADMAP.md)
 - [Capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md)
 - [OpenCode reliability contract](docs/OPENCODE_RELIABILITY_CONTRACT.md)

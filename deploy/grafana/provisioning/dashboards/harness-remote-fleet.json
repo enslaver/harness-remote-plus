@@ -1,0 +1,92 @@
+{
+  "uid": "harness-remote-fleet",
+  "title": "Harness Remote - fleet logs",
+  "tags": ["harness-remote"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "machine",
+        "label": "Machine",
+        "type": "query",
+        "datasource": { "type": "loki", "uid": "harness-remote-loki" },
+        "query": { "label": "machine", "refId": "machines", "stream": "{job=\"harness-remote\"}", "type": 1 },
+        "definition": "label_values({job=\"harness-remote\"}, machine)",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "refresh": 2,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "custom",
+        "query": "error,warn,info",
+        "includeAll": true,
+        "allValue": ".+",
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      { "name": "search", "label": "Contains", "type": "textbox", "query": "" }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Errors by machine",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "loki", "uid": "harness-remote-loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (machine) (count_over_time({job=\"harness-remote\", kind=\"log\", level=\"error\", machine=~\"$machine\"} [$__auto]))",
+          "legendFormat": "{{machine}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Log volume by source",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "loki", "uid": "harness-remote-loki" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (source) (count_over_time({job=\"harness-remote\", kind=\"log\", machine=~\"$machine\"} [$__auto]))",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60, "stacking": { "mode": "normal" } } }, "overrides": [] }
+    },
+    {
+      "id": 3,
+      "type": "logs",
+      "title": "Logs",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 7 },
+      "datasource": { "type": "loki", "uid": "harness-remote-loki" },
+      "targets": [
+        { "refId": "A", "expr": "{job=\"harness-remote\", kind=\"log\", machine=~\"$machine\", level=~\"$level\"} |= \"$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "Machine, session and proxy events",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 19 },
+      "datasource": { "type": "loki", "uid": "harness-remote-loki" },
+      "targets": [
+        { "refId": "A", "expr": "{job=\"harness-remote\", kind=\"event\", machine=~\"$machine\"} |= \"$search\"" }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true }
+    }
+  ]
+}
