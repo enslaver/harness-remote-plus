@@ -8,6 +8,8 @@ import { parseConfig, usage as bridgeUsage } from "./config.js"
 import { acpHarnessCapabilityContract, openCodeCapabilityContract } from "./harness-capability-contract.js"
 import { harnessProfile, resolveAcpLaunch } from "./harness-profiles.js"
 import { canListen, canListenForBind, harnessPortUnavailableMessage, resolveLaunchPlan } from "./launcher.js"
+import { extractHubArgs } from "./hub-options.js"
+import { prepareHubReporting } from "./hub-reporter.js"
 import { loadMachineIdentity } from "./machine-registry.js"
 import { MachineDaemon, createMachineDaemonServer } from "./machine-daemon.js"
 import { ManagedOpenCodeHost } from "./opencode-host.js"
@@ -97,8 +99,14 @@ export async function ensureHarnessPortAvailable({ port, host, canListenImpl = c
 
 async function main() {
   let parsed
+  let hubFlags
+  let args
   try {
-    parsed = parseDaemonOptions(process.argv.slice(2))
+    // Hub flags are split out first: the bridge option parsers reject anything they do not know.
+    const extracted = extractHubArgs(process.argv.slice(2))
+    hubFlags = extracted.flags
+    args = extracted.rest
+    parsed = parseDaemonOptions(args)
   } catch (error) {
     process.stderr.write(`${error.message}\n\n${daemonUsage()}\n`)
     process.exitCode = 1
@@ -114,12 +122,14 @@ async function main() {
   if (openCode && openCodePort === config.port) {
     throw new Error(`OpenCode port ${openCodePort} conflicts with the Harness daemon port`)
   }
+  // Start capturing output before anything else logs, so a startup failure reaches the hub too.
+  const hub = await prepareHubReporting({ flags: hubFlags, config })
   await ensureHarnessPortAvailable({ port: config.port, host: config.host })
   if (openCode) await ensureOpenCodePortAvailable({ port: openCodePort, host: openCodeHost })
 
   const identity = await loadMachineIdentity(config.stateDirectory)
   const daemon = new MachineDaemon(identity)
-  const plan = resolveLaunchPlan(process.argv.slice(2))
+  const plan = resolveLaunchPlan(args)
   const acpBackends = [...new Set([...plan.detected.filter((backend) => backend !== "opencode"), config.backend])]
   const primaryProfile = harnessProfile(config.backend)
   const acpHosts = new Map()
@@ -262,14 +272,19 @@ async function main() {
   for (const result of managedResults) {
     if (result.status !== "available") process.stderr.write(`[${result.id}] unavailable: ${result.error?.message ?? "startup failed"}\n`)
   }
+  // Not awaited: the hub is optional, and enrolling over a slow network must not delay "ready".
+  hub?.start({ identity, snapshot: () => daemon.snapshot(), scoped: true }).catch((error) => process.stderr.write(`[hub] ${error.message}\n`))
 
   let shuttingDown = false
   const shutdown = () => {
     if (shuttingDown) return
     shuttingDown = true
     daemon.close()
-    server.close(() => process.exit(0))
+    const finish = () => server.close(() => process.exit(0))
     setTimeout(() => process.exit(1), 5_000).unref()
+    // Let the last log lines (often the reason for the shutdown) leave before the process does.
+    if (hub) hub.stop().then(finish, finish)
+    else finish()
   }
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
