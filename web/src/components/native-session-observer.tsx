@@ -42,6 +42,10 @@ type Props = {
   onStateChange?: (state: NativeSessionVisualState) => void
   /** False while the owning machine is still bootstrapping or is in reconnect grace. Reads remain visible. */
   interactionEnabled?: boolean
+  /** The Session is being driven by something else (a running background agent): follow it, do not write to it. */
+  readOnly?: boolean
+  /** Bump to re-read the transcript tail (a background agent writes it from another process, so there is no live event to wait for). */
+  refreshSignal?: number
   /** A Session-scoped request discovered a transport outage before the machine poll did. */
   onConnectionIssue?: () => void
 }
@@ -163,6 +167,8 @@ export function NativeSessionObserver({
   onSessionRefresh,
   onStateChange,
   interactionEnabled = true,
+  readOnly = false,
+  refreshSignal = 0,
   onConnectionIssue
 }: Props) {
   const [conversation, setConversation] = useState<ConversationRuntime | null>(null)
@@ -211,6 +217,10 @@ export function NativeSessionObserver({
   const handleTranscriptRefresh = useCallback(() => {
     setTranscriptRefreshToken((current) => current + 1)
   }, [])
+
+  useEffect(() => {
+    if (refreshSignal) handleTranscriptRefresh()
+  }, [refreshSignal, handleTranscriptRefresh])
 
   useEffect(() => {
     if (presentedConversation) onStateChangeRef.current?.(visualState(presentedConversation, attentionRef.current))
@@ -454,6 +464,7 @@ export function NativeSessionObserver({
         onAttentionChange={handleAttentionChange}
         commands={commands}
         interactionEnabled={interactionEnabled}
+        readOnly={readOnly}
         onConnectionIssue={onConnectionIssue}
         routing={onOpenSession && sameMachineRoutes.length ? {
           currentMachineID: target.machineID,

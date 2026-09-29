@@ -96,6 +96,9 @@ type Props = {
   transcriptRefreshToken?: number
   /** Backend mutations/catalog reads pause while the owning machine is reconnecting. */
   interactionEnabled?: boolean
+  /** Look but do not write: the composer is disabled while live updates keep flowing. Distinct from
+   * `interactionEnabled`, which also pauses observation because it means the machine is unreachable. */
+  readOnly?: boolean
   /** Surface a Session-scoped transport failure to the machine runtime immediately. */
   onConnectionIssue?: () => void
   routing?: {
@@ -324,6 +327,7 @@ export function WorkThreadConversation({
   controller,
   transcriptRefreshToken = 0,
   interactionEnabled = true,
+  readOnly = false,
   onConnectionIssue,
   routing
 }: Props) {
@@ -1127,9 +1131,9 @@ export function WorkThreadConversation({
         onAttachmentError={setError}
         onSend={send}
         sending={preparingReply}
-        sendDisabled={!interactionEnabled || working || replySettling || hasAttention || routeBlockedByAttachments || modelBootstrapBlocked}
-        composerDisabled={!interactionEnabled || modelBootstrapBlocked}
-        onStop={working && interactionEnabled ? stop : undefined}
+        sendDisabled={!interactionEnabled || working || replySettling || hasAttention || routeBlockedByAttachments || modelBootstrapBlocked || readOnly}
+        composerDisabled={!interactionEnabled || modelBootstrapBlocked || readOnly}
+        onStop={working && interactionEnabled && !readOnly ? stop : undefined}
         stopping={stopping}
         placeholder={`Message ${agentLabel(destinationAgents, targetAgentID)}…`}
         emptyText="Start the conversation. You can continue with another coding agent at any time."

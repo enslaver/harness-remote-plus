@@ -44,7 +44,8 @@ test("a model catalog failure keeps history readable but native mutations gated"
   assert.match(chat, /tdw-field-note/)
   assert.match(chat, /Model catalog unavailable\. Sending is paused until a model can be verified\./)
   assert.match(chat, /modelBootstrapBlocked/)
-  assert.match(chat, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked\}/)
+  // `readOnly` (a running background agent owns the Session) is the only other reason to lock the composer.
+  assert.match(chat, /composerDisabled=\{!interactionEnabled \|\| modelBootstrapBlocked( \|\| readOnly)?\}/)
   assert.match(chat, /unavailableHint=\{modelError \|\| undefined\}/)
   assert.match(chat, /const presentedTimeline = useMemo/)
   assert.match(chat, /messages=\{presentedTimeline\}/)

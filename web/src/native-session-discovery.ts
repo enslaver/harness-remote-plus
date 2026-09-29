@@ -232,7 +232,7 @@ async function withinNativeSessionDiscoveryBudget<T>(
   }
 }
 
-function nativeSessionRecords(
+export function nativeSessionRecords(
   agent: MachineAgentHost,
   config: ServerConfig,
   sessions: Session[],

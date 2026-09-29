@@ -53,6 +53,7 @@ import { CommandPalette, type PaletteCommand } from "./shell"
 import { NativeSessionActions } from "./native-session-actions"
 import { NativeSessionHome } from "./native-session-home"
 import { NativeSessionTitle } from "./native-session-rename"
+import { BackgroundAgentBar } from "./background-agent-bar"
 import { NativeSessionObserver, type NativeSessionVisualState } from "./native-session-observer"
 import "../taskdesk-workthreads.css"
 import "../taskdesk-mobile-navigation.css"
@@ -482,6 +483,9 @@ function NativeSessionsWorkspace({
   const [reconnectingStreams, setReconnectingStreams] = useState<Record<string, boolean>>({})
   const [selected, setSelected] = useState<NativeSessionSurfaceTarget | null>(null)
   const [selectedState, setSelectedState] = useState<NativeSessionVisualState | undefined>(undefined)
+  // A background agent that is still running owns its Session: its transcript is followed, not written to.
+  const [backgroundLive, setBackgroundLive] = useState(false)
+  const [backgroundRefresh, setBackgroundRefresh] = useState(0)
   const [selectedLinks, setSelectedLinks] = useState<NativeSessionLink[]>([])
   const [lineageError, setLineageError] = useState<string | null>(null)
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
@@ -1081,12 +1085,21 @@ function NativeSessionsWorkspace({
                   {lineageError ? <div className="hr-session-lineage-error" role="alert">{lineageError}</div> : null}
                 </section>
               ) : null}
+              <BackgroundAgentBar
+                key={selected.key}
+                target={selected}
+                onChanged={() => setListRevision((value) => value + 1)}
+                onLiveChange={setBackgroundLive}
+                onRefreshTick={() => setBackgroundRefresh((value) => value + 1)}
+              />
               <div className="hr-native-workspace-chat">
                 <NativeSessionObserver
                   key={selected.key}
                   target={selected}
                   routes={routeMachines}
                   interactionEnabled={selectedInteractionEnabled}
+                  readOnly={backgroundLive}
+                  refreshSignal={backgroundRefresh}
                   onConnectionIssue={markSelectedMachineConnectionIssue}
                   onOpenSession={openSession}
                   onSessionRefresh={() => setListRevision((value) => value + 1)}
