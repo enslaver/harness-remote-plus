@@ -15,3 +15,8 @@ web/release-*/
 
 # The bridge has no dependencies; CI runs its tests without installing any.
 bridge/package-lock.json
+
+# Hub: dependencies and local deployment secrets/data. `.env` holds real passwords.
+hub/node_modules/
+.env
+deploy/data/
