@@ -1,4 +1,7 @@
 import { createAgentRoutingServer } from "./agent-router.js"
+import { allowedDirectory } from "./allowed-directory.js"
+import { createBackgroundAgentServer } from "./background-agent-server.js"
+import { createBackgroundAgentService } from "./claude-background-agents.js"
 import { createAgentModelServer } from "./agent-model-server.js"
 import { createCrossMachineHandoffServer } from "./cross-machine-handoff-server.js"
 import { createCrossMachineTargetRuntime } from "./cross-machine-target-runtime.js"
@@ -199,6 +202,8 @@ export function createMachineDaemonServer({
   createLaunchServer = createTaskLaunchServer,
   createFinishServer = createTaskFinishServer,
   createWorkThreadServerFactory = createWorkThreadServer,
+  createBackgroundAgentServerFactory = createBackgroundAgentServer,
+  backgroundAgentService,
   taskStore,
   projectCatalog,
   worktreeManager,
@@ -681,5 +686,9 @@ export function createMachineDaemonServer({
   const launchServer = createLaunchServer({ innerServer: crossMachineHandoffServer, config, taskRunController: runs })
   const modelServer = createModelServer({ innerServer: launchServer, config, daemon, taskStore: tasks, projectCatalog: projects })
   const finishServer = createFinishServer({ innerServer: modelServer, config, taskStore: tasks, worktreeManager: worktrees, taskRunController: runs })
-  return createWorkThreadServerFactory({ innerServer: finishServer, config, controller: threads })
+  const workThreadServer = createWorkThreadServerFactory({ innerServer: finishServer, config, controller: threads })
+  // Claude Code background agents are driven through the user's own `claude` CLI and need nothing from the
+  // ACP hosts, so this sits outermost and only claims /v1/background-agents.
+  const backgrounds = backgroundAgentService ?? createBackgroundAgentService({ isAllowedDirectory: (directory) => allowedDirectory(directory, config) })
+  return createBackgroundAgentServerFactory({ innerServer: workThreadServer, config, service: backgrounds })
 }

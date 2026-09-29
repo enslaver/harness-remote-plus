@@ -148,6 +148,7 @@ test("machine server wires registry, routing, native Session operations, task li
   let modelOptions
   let finishOptions
   let workThreadOptions
+  let backgroundOptions
   const bridgeServer = { marker: "bridge", acpService: { async claimSession() { return true }, async prompt() {}, async abort() {} } }
   const routedServer = { marker: "router" }
   const claimServer = { marker: "session-claim" }
@@ -156,6 +157,8 @@ test("machine server wires registry, routing, native Session operations, task li
   const modelServer = { marker: "models" }
   const finishServer = { marker: "finish" }
   const workThreadServer = { marker: "work-threads" }
+  const backgroundServer = { marker: "background-agents" }
+  const fakeBackgroundService = { marker: "background-agent-service" }
   const fakeLedger = { marker: "operation-ledger" }
   const value = createMachineDaemonServer({
     daemon,
@@ -171,10 +174,15 @@ test("machine server wires registry, routing, native Session operations, task li
     createLaunchServer: (options) => { launchOptions = options; return launchServer },
     createModelServer: (options) => { modelOptions = options; return modelServer },
     createFinishServer: (options) => { finishOptions = options; return finishServer },
-    createWorkThreadServerFactory: (options) => { workThreadOptions = options; return workThreadServer }
+    createWorkThreadServerFactory: (options) => { workThreadOptions = options; return workThreadServer },
+    backgroundAgentService: fakeBackgroundService,
+    createBackgroundAgentServerFactory: (options) => { backgroundOptions = options; return backgroundServer }
   })
 
-  assert.equal(value, workThreadServer)
+  // Outermost: Claude Code background agents need nothing from the ACP hosts, so they wrap everything else.
+  assert.equal(value, backgroundServer)
+  assert.equal(backgroundOptions.innerServer, workThreadServer)
+  assert.equal(backgroundOptions.service, fakeBackgroundService)
   assert.equal(bridgeOptions.machineRegistry, daemon.registry)
   assert.equal(bridgeOptions.acp, acp)
   assert.equal(routerOptions.daemon, daemon)

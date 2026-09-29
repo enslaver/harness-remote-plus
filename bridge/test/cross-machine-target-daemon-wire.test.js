@@ -56,7 +56,8 @@ test("machine daemon wires the cross-machine target boundary behind the native S
     },
     createModelServer: ({ innerServer }) => innerServer,
     createFinishServer: ({ innerServer }) => innerServer,
-    createWorkThreadServerFactory: ({ innerServer }) => innerServer
+    createWorkThreadServerFactory: ({ innerServer }) => innerServer,
+    createBackgroundAgentServerFactory: ({ innerServer }) => innerServer
   })
 
   assert.equal(value, targetServer)
