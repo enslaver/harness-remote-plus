@@ -113,3 +113,19 @@ export function loadConfig(env = process.env, { readFile = readFileSync } = {}) 
   if (problems.length) throw new ConfigError(problems)
   return Object.freeze(config)
 }
+
+/**
+ * Settings that are valid but probably not what the operator meant. Logged once at startup; never fatal,
+ * because a hub on a private network over plain HTTP is a legitimate deployment.
+ */
+export function configWarnings(config) {
+  const warnings = []
+  if (config.publicUrl?.startsWith("https:") && !config.trustProxy) {
+    warnings.push(
+      "HUB_PUBLIC_URL is https but HUB_TRUST_PROXY is off. Behind a TLS-terminating proxy the session cookie will not be " +
+        "marked Secure and every visitor shares one sign-in throttle bucket. Set HUB_TRUST_PROXY=1 if a proxy you control " +
+        "(Caddy, nginx, Tailscale serve) is in front of the hub."
+    )
+  }
+  return warnings
+}

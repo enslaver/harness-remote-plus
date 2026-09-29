@@ -1,0 +1,126 @@
+# Harness Remote Hub: web UI + machine registry (Postgres) + log collection (Loki).
+#
+#   sh deploy/init-env.sh      # writes .env with generated secrets
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# Optional profiles:   --profile grafana   dashboards over the logs   (http://localhost:3000)
+#                      --profile tls       Caddy with automatic HTTPS (needs HUB_DOMAIN)
+#
+# Full guide, security notes and iPhone setup: docs/HUB.md
+
+name: harness-remote-hub
+
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: hub/Dockerfile
+    image: harness-remote-hub:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    environment:
+      # `:?` makes compose refuse to start with a message instead of running with an empty secret.
+      HUB_DATABASE_URL: postgres://hub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (run sh deploy/init-env.sh)}@postgres:5432/hub
+      HUB_LOKI_URL: http://loki:3100
+      HUB_ADMIN_PASSWORD: ${HUB_ADMIN_PASSWORD:?Set HUB_ADMIN_PASSWORD in .env (run sh deploy/init-env.sh)}
+      HUB_SECRET_KEY: ${HUB_SECRET_KEY:?Set HUB_SECRET_KEY in .env (run sh deploy/init-env.sh)}
+      HUB_ENROLLMENT_TOKEN: ${HUB_ENROLLMENT_TOKEN:-}
+      HUB_PUBLIC_URL: ${HUB_PUBLIC_URL:-}
+      HUB_TRUST_PROXY: ${HUB_TRUST_PROXY:-0}
+      HUB_NAME: ${HUB_NAME:-Harness Remote Hub}
+      HUB_INSTALL_COMMAND: ${HUB_INSTALL_COMMAND:-npx --yes github:enslaver/harness-remote-plus}
+    ports:
+      # Loopback by default: the console is password-protected but plain HTTP, so exposing it on a
+      # network is a decision. Set HUB_BIND=0.0.0.0 (and read the HTTPS section of docs/HUB.md).
+      - "${HUB_BIND:-127.0.0.1}:${HUB_PORT:-8080}:8080"
+    extra_hosts:
+      # Lets the hub reach a machine running on this Docker host itself (advertise http://host.docker.internal:PORT).
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hub
+      POSTGRES_DB: hub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (run sh deploy/init-env.sh)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hub -d hub"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No published port: only the hub talks to it, over the compose network.
+
+  loki:
+    image: grafana/loki:3.4.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/config.yml"]
+    volumes:
+      - ./deploy/loki/loki-config.yml:/etc/loki/config.yml:ro
+      - lokidata:/loki
+    healthcheck:
+      # Loki's image is distroless-ish: busybox wget lives at /busybox/wget. It needs ~15s to report ready.
+      test: ["CMD", "/busybox/wget", "-q", "-O", "-", "http://127.0.0.1:3100/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  grafana:
+    profiles: ["grafana"]
+    image: grafana/grafana:11.5.2
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-${HUB_ADMIN_PASSWORD}}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafanadata:/var/lib/grafana
+    ports:
+      - "${GRAFANA_BIND:-127.0.0.1}:${GRAFANA_PORT:-3000}:3000"
+
+  caddy:
+    profiles: ["tls"]
+    image: caddy:2.9-alpine
+    restart: unless-stopped
+    depends_on:
+      - hub
+    environment:
+      # Compose checks every service's variables even when its profile is off, so this cannot be a required
+      # variable. `localhost` makes the profile work out of the box with a locally-trusted certificate.
+      HUB_DOMAIN: ${HUB_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+
+volumes:
+  pgdata:
+  lokidata:
+  grafanadata:
+  caddydata:
+  caddyconfig:

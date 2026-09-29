@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { ConfigError, loadConfig } from "../src/config.js"
+import { ConfigError, configWarnings, loadConfig } from "../src/config.js"
 
 const valid = {
   HUB_DATABASE_URL: "postgres://hub:pw@db:5432/hub",
@@ -68,4 +68,13 @@ test("validates URLs and numeric ranges", () => {
   assert.equal(config.lokiUrl, "http://loki:3100")
   assert.equal(config.publicUrl, "https://hub.example.com")
   assert.equal(config.trustProxy, true)
+})
+
+test("warns when the public URL is https but the proxy is not trusted", () => {
+  assert.equal(configWarnings(loadConfig(valid)).length, 0)
+  assert.equal(configWarnings(loadConfig({ ...valid, HUB_PUBLIC_URL: "http://hub.lan:8080" })).length, 0)
+  const warned = configWarnings(loadConfig({ ...valid, HUB_PUBLIC_URL: "https://hub.example.com" }))
+  assert.equal(warned.length, 1)
+  assert.match(warned[0], /HUB_TRUST_PROXY=1/)
+  assert.equal(configWarnings(loadConfig({ ...valid, HUB_PUBLIC_URL: "https://hub.example.com", HUB_TRUST_PROXY: "1" })).length, 0)
 })

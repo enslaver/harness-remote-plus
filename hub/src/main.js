@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from "node:path"
 import { fileURLToPath } from "node:url"
-import { ConfigError, loadConfig } from "./config.js"
+import { ConfigError, configWarnings, loadConfig } from "./config.js"
 import { SecretBox, deriveKeys } from "./crypto.js"
 import { createPool, migrate } from "./db.js"
 import { LokiSink, nullSink } from "./events.js"
@@ -24,6 +24,7 @@ async function main() {
     }
     throw error
   }
+  for (const warning of configWarnings(config)) log(`warning: ${warning}`)
   // Relative directory settings resolve against the package root, not the process cwd.
   const resolved = {
     ...config,

@@ -1,0 +1,13 @@
+# Automatic HTTPS in front of the hub (compose profile "tls").
+#
+# HUB_DOMAIN must be a real DNS name pointing at this machine with ports 80/443 reachable, so Caddy
+# can obtain a certificate. Also set HUB_TRUST_PROXY=1 and HUB_PUBLIC_URL=https://<domain> in .env so
+# the hub marks its cookie Secure and prints the right install command.
+{$HUB_DOMAIN} {
+	encode zstd gzip
+
+	reverse_proxy hub:8080 {
+		# Server-sent events (the live session stream) must not be buffered.
+		flush_interval -1
+	}
+}
