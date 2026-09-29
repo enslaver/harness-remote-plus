@@ -43,8 +43,9 @@ export function machineId(value) {
  * before the prober's identity check would have rejected it.
  */
 export function isForbiddenEndpointHost(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase()
-  if (host === "metadata.google.internal" || host === "metadata") return true
+  // `metadata.google.internal.` (a trailing dot is the same name) must not slip past an exact match.
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.+$/, "")
+  if (FORBIDDEN_NAMES.has(host)) return true
   // The URL parser has already canonicalised decimal/hex/octal IPv4 spellings to dotted quads.
   if (/^169\.254\./.test(host)) return true
   if (!host.includes(":")) return false
@@ -52,11 +53,28 @@ export function isForbiddenEndpointHost(hostname) {
   const groups = ipv6Groups(host)
   if (!groups) return true // an IPv6 literal we cannot read is not one we should connect to
   if ((groups[0] & 0xffc0) === 0xfe80) return true
+  // AWS's IPv6 instance-metadata endpoint, fd00:ec2::254 (the whole fd00:ec2::/32 is AWS's).
+  if (groups[0] === 0xfd00 && groups[1] === 0x0ec2) return true
   // IPv4 smuggled inside IPv6: ::ffff:a.b.c.d (mapped, which URL prints as ::ffff:a9fe:a9fe), the
-  // deprecated ::a.b.c.d form, and NAT64's 64:ff9b::a.b.c.d.
+  // deprecated ::a.b.c.d form, NAT64's 64:ff9b::a.b.c.d and its local-use 64:ff9b:1::/48 (both carry the
+  // IPv4 address in the last 32 bits), and 6to4's 2002:a.b.c.d::/16 (the address follows the prefix).
   const embedsIPv4 = groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)
-  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)
-  return (embedsIPv4 || nat64) && groups[6] >> 8 === 169 && (groups[6] & 0xff) === 254
+  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b && (groups.slice(2, 6).every((group) => group === 0) || groups[2] === 1)
+  if ((embedsIPv4 || nat64) && isLinkLocalV4(groups[6], groups[7])) return true
+  if (groups[0] === 0x2002 && isLinkLocalV4(groups[1], groups[2])) return true
+  return false
+}
+
+const FORBIDDEN_NAMES = new Set([
+  "metadata",
+  "metadata.google.internal",
+  "metadata.goog",
+  "instance-data",
+  "instance-data.ec2.internal"
+])
+
+function isLinkLocalV4(high, low) {
+  return high >> 8 === 169 && (high & 0xff) === 254 && Number.isInteger(low)
 }
 
 /** Expands an IPv6 literal into its eight 16-bit groups, or null if it is malformed. */
@@ -185,6 +203,21 @@ export function sessionList(value) {
     if (sessions.length >= MAX_SESSIONS) break
   }
   return sessions
+}
+
+/**
+ * Agents whose Session list this heartbeat carries IN FULL. Only for those may the hub conclude that a
+ * Session missing from the list is gone; an agent that was asleep (not listed at all) or whose list was
+ * cut short must not have its Sessions marked gone.
+ */
+export function sessionAgentList(value) {
+  if (!Array.isArray(value)) return []
+  const ids = new Set()
+  for (const candidate of value.slice(0, MAX_AGENTS)) {
+    const id = text(candidate, 64)
+    if (id) ids.add(id)
+  }
+  return [...ids]
 }
 
 export function credentialsObject(value) {

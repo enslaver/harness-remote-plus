@@ -11,7 +11,7 @@ import { Prober } from "./prober.js"
 import { createMachineProxy, parseProxyPath } from "./proxy.js"
 import { createStaticServer } from "./static.js"
 import {
-  ValidationError, agentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
+  ValidationError, agentList, sessionAgentList, clientLogEntries, configObject, credentialsObject, endpointList, logEntries, machineInfo, sessionList, statsObject
 } from "./validate.js"
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
@@ -45,7 +45,7 @@ function validated(work) {
  * Builds the HTTP surface. Dependencies are injected so tests can run the real router against a real
  * database without any process-level state.
  */
-export function createHub({ config, store, auth, keys, sink = nullSink, loki, prober, now = () => Date.now() }) {
+export function createHub({ config, store, auth, keys, sink = nullSink, loki, prober, now = () => Date.now(), proxyOptions = {} }) {
   const adminAuth = auth ?? new AdminAuth({ config, keys, now })
   const loginThrottle = new AttemptThrottle({ max: 10, windowMs: 5 * 60_000, now })
   // Failed enrollment tokens and failed machine tokens share one budget per address.
@@ -55,7 +55,7 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
   const consoleStatic = createStaticServer({ root: config.publicDir, headers: { "Content-Security-Policy": CONSOLE_CSP } })
   const appStatic = createStaticServer({ root: config.webDir, spa: true, headers: { "Content-Security-Policy": APP_CSP }, fallbackHtml: WEB_NOT_BUILT })
   const activeProber = prober ?? new Prober({ store, sink, config })
-  const proxy = createMachineProxy({ store, config, sink, prober: activeProber, log: (message) => process.stderr.write(`[hub] ${message}\n`) })
+  const proxy = createMachineProxy({ store, config, sink, prober: activeProber, log: (message) => process.stderr.write(`[hub] ${message}\n`), ...proxyOptions })
   const presentOptions = () => ({ offlineAfterMs: config.offlineAfterMs, now: now() })
 
   /** Browser/admin routes. No WWW-Authenticate header: the SPA handles 401 itself, never a native prompt. */
@@ -207,8 +207,11 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       config: configObject(body.config),
       agents: agentList(body.agents),
       stats: statsObject(body.stats),
-      sessions: sessionList(body.sessions)
+      sessions: sessionList(body.sessions),
+      sessionAgents: sessionAgentList(body.sessionAgents)
     }))
+    // If anything was cut from the list on the way in, "not listed" no longer means "gone".
+    if (Array.isArray(body.sessions) && body.sessions.length > update.sessions.length) update.sessionAgents = []
     const result = await store.recordHeartbeat(row.id, update)
     if (!result) throw new HttpError(401, "invalid_token", "Unknown or revoked machine token")
     if (result.transitions.length) await sink.sessionTransitions(row, result.transitions)

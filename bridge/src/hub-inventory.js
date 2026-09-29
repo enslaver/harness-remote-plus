@@ -37,6 +37,8 @@ export async function collectSessions({ config, agents, scoped, request = reques
   const base = localBaseUrl(config)
   const headers = basic(config.username, config.password)
   const sessions = []
+  // Agents whose list came back whole. Only for those can the hub tell "gone" from "not asked".
+  const completeAgents = []
   for (const agent of agents) {
     if (agent.state !== "available") continue
     const prefix = scoped ? `/v1/agents/${encodeURIComponent(agent.id)}` : ""
@@ -47,13 +49,15 @@ export async function collectSessions({ config, agents, scoped, request = reques
       const statuses = await request(`${base}${prefix}/session/status`, { headers, timeoutMs: REQUEST_TIMEOUT_MS })
         .then((response) => (response.status === 200 && response.json && typeof response.json === "object" ? response.json : {}))
         .catch(() => ({}))
+      if (listed.json.length <= MAX_SESSIONS_PER_AGENT && !listed.headers?.["x-next-cursor"]) completeAgents.push(agent.id)
       for (const session of listed.json.slice(0, MAX_SESSIONS_PER_AGENT)) {
         if (!session || typeof session.id !== "string") continue
         sessions.push({
           agentId: agent.id,
           id: session.id,
-          title: typeof session.title === "string" ? session.title : "",
-          directory: typeof session.directory === "string" ? session.directory : "",
+          // The hub keeps 300 / 1024 characters; sending more only risks an oversized heartbeat.
+          title: typeof session.title === "string" ? session.title.slice(0, 300) : "",
+          directory: typeof session.directory === "string" ? session.directory.slice(0, 1024) : "",
           status: statusType(session.status) ?? statusType(statuses[session.id]) ?? "unknown",
           createdAt: session.time?.created,
           updatedAt: session.time?.updated
@@ -63,5 +67,5 @@ export async function collectSessions({ config, agents, scoped, request = reques
       // One agent failing to answer must not hide the others, or stop the heartbeat.
     }
   }
-  return sessions
+  return { sessions, completeAgents }
 }

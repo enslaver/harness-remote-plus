@@ -84,7 +84,7 @@ export class Store {
    * Applies one heartbeat and returns the Session transitions it caused, so the caller can emit them
    * as events. `credentials` is `undefined` to keep what is stored, an object to replace it.
    */
-  async recordHeartbeat(machineId, { info, endpoints, credentials, proxyEnabled, config, agents, stats, sessions }) {
+  async recordHeartbeat(machineId, { info, endpoints, credentials, proxyEnabled, config, agents, stats, sessions, sessionAgents = [] }) {
     return this.transaction(async (client) => {
       const current = (await client.query("select config, endpoints, verified_endpoint from machines where id = $1 for update", [machineId])).rows[0]
       if (!current) return null
@@ -111,6 +111,7 @@ export class Store {
         await client.query("insert into machine_config_history (machine_id, config) values ($1, $2::jsonb)", [machineId, JSON.stringify(config)])
       }
       const transitions = await this.upsertSessions(client, machineId, sessions)
+      await this.markMissingSessions(client, machineId, sessionAgents, sessions)
       return { configChanged, transitions }
     })
   }
@@ -145,6 +146,24 @@ export class Store {
       [machineId, JSON.stringify(batch)]
     )
     return transitions
+  }
+
+  /**
+   * A Session the machine no longer lists (deleted, or removed on disk) is marked `gone` rather than left
+   * showing its last status, which would keep a long-dead `busy` Session inflating the active count until
+   * the retention sweep. Rows are kept for the retention window so the history stays inspectable.
+   */
+  async markMissingSessions(client, machineId, sessionAgents, sessions) {
+    if (!sessionAgents.length) return
+    await client.query(
+      `update sessions set status = 'gone'
+       where machine_id = $1 and agent_id = any($2::text[]) and status <> 'gone'
+         and not exists (
+           select 1 from jsonb_to_recordset($3::jsonb) as t(agent_id text, session_id text)
+           where t.agent_id = sessions.agent_id and t.session_id = sessions.session_id
+         )`,
+      [machineId, sessionAgents, JSON.stringify(sessions.map((session) => ({ agent_id: session.agent_id, session_id: session.session_id })))]
+    )
   }
 
   async listMachines() {

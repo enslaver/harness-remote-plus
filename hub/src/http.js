@@ -84,26 +84,34 @@ export function parseCookies(header) {
   return cookies
 }
 
-function firstForwarded(value) {
-  return typeof value === "string" ? value.split(",")[0].trim() : ""
+/**
+ * The entry appended by the proxy that faces the hub, i.e. the LAST one. An appending proxy (nginx's
+ * `$proxy_add_x_forwarded_for`) keeps whatever the client sent in front of its own entry, so the first
+ * value is client-controlled and would let anyone rotate their apparent address to dodge the login and
+ * enrollment throttles. `HUB_TRUST_PROXY` therefore means "exactly one trusted proxy hop".
+ */
+function lastForwarded(value) {
+  if (typeof value !== "string") return ""
+  const parts = value.split(",")
+  return parts[parts.length - 1].trim()
 }
 
 /** Forwarded headers are attacker-controlled unless a trusted proxy sits in front, so honour them only on request. */
 export function isSecureRequest(req, trustProxy) {
   if (req.socket?.encrypted) return true
-  return trustProxy && firstForwarded(req.headers["x-forwarded-proto"]).toLowerCase() === "https"
+  return trustProxy && lastForwarded(req.headers["x-forwarded-proto"]).toLowerCase() === "https"
 }
 
 export function clientAddress(req, trustProxy) {
   if (trustProxy) {
-    const forwarded = firstForwarded(req.headers["x-forwarded-for"])
+    const forwarded = lastForwarded(req.headers["x-forwarded-for"])
     if (forwarded) return forwarded
   }
   return req.socket?.remoteAddress ?? "unknown"
 }
 
 export function requestHost(req, trustProxy) {
-  return (trustProxy && firstForwarded(req.headers["x-forwarded-host"])) || req.headers.host || "localhost"
+  return (trustProxy && lastForwarded(req.headers["x-forwarded-host"])) || req.headers.host || "localhost"
 }
 
 /** The URL machines and browsers should use to reach this hub. Configuration wins over inference. */

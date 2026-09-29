@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import {
-  ValidationError, agentList, configObject, credentialsObject, endpointList, endpointUrl, logEntries, machineId, machineInfo,
+  ValidationError, agentList, sessionAgentList, configObject, credentialsObject, endpointList, endpointUrl, logEntries, machineId, machineInfo,
   scrubConfig, sessionList, statsObject
 } from "../src/validate.js"
 
@@ -146,4 +146,29 @@ test("logEntries clamps absurd timestamps, sanitises source and bounds size", ()
   assert.equal(logEntries([{ line: "" }, { line: 5 }, null], now).length, 0)
   assert.throws(() => logEntries("nope"), ValidationError)
   assert.throws(() => logEntries(Array.from({ length: 1_001 }, () => ({ line: "x" }))), /at most 1000/)
+})
+
+test("endpoint validation refuses the metadata-service spellings that used to slip through", () => {
+  for (const blocked of [
+    "http://metadata.google.internal./",
+    "http://METADATA.GOOGLE.INTERNAL/",
+    "http://metadata.goog/",
+    "http://instance-data.ec2.internal/",
+    "http://[fd00:ec2::254]/",
+    "http://[64:ff9b:1::a9fe:a9fe]/",
+    "http://[2002:a9fe:a9fe::1]/",
+    "http://[::ffff:169.254.169.254]/",
+    "http://169.254.169.254/"
+  ]) {
+    assert.equal(endpointUrl(blocked), null, `${blocked} must be refused`)
+  }
+  for (const fine of ["http://192.168.1.20:4097", "http://[2002:c0a8:101::1]:4097", "http://[64:ff9b::c0a8:101]:4097", "http://desk.local:4097", "https://desk.tailnet.ts.net:4097"]) {
+    assert.ok(endpointUrl(fine), `${fine} is an ordinary gateway address`)
+  }
+})
+
+test("sessionAgentList keeps only sane, unique agent ids", () => {
+  assert.deepEqual(sessionAgentList(["codex", "codex", " omp ", "", 5, null, "x".repeat(200)].concat([])), ["codex", "omp", "x".repeat(64)])
+  assert.deepEqual(sessionAgentList("codex"), [])
+  assert.deepEqual(sessionAgentList(undefined), [])
 })

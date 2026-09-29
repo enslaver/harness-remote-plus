@@ -110,8 +110,10 @@ uses a local CA, which is enough to try the setup on the same computer but is **
 **Your own reverse proxy** (nginx, Traefik, …): forward to `hub:8080`, disable response buffering for `/m/`
 (server-sent events), and set `HUB_TRUST_PROXY=1`.
 
-`HUB_TRUST_PROXY=1` makes the hub believe `X-Forwarded-Proto`/`-For`/`-Host`. Anyone who can reach the hub *directly*
-can forge them, so set it only when the proxy is the only way in.
+`HUB_TRUST_PROXY=1` makes the hub believe `X-Forwarded-Proto`/`-For`/`-Host`, taking the **last** entry of each: the one
+the proxy in front of the hub appended itself, since an appending proxy (nginx's `$proxy_add_x_forwarded_for`) leaves
+whatever the client sent in front. It trusts exactly one proxy hop. Anyone who can reach the hub *directly* can forge
+the headers, so set it only when the proxy is the only way in.
 
 ### Add to Home Screen
 
@@ -134,7 +136,7 @@ secret can instead be given as `NAME_FILE=/path` (Docker/Kubernetes secrets).
 | `HUB_PUBLIC_URL` | derived | The address people and machines use; shown in install commands. |
 | `HUB_TRUST_PROXY` | `0` | See above. |
 | `HUB_INSTALL_COMMAND` | `npx --yes github:enslaver/harness-remote-plus` | What the console tells people to run. |
-| `HUB_PORT` / `HUB_HOST` | `8080` / `0.0.0.0` | Inside the container. |
+| `HUB_PORT` / `HUB_HOST` | `8080` / `0.0.0.0` | Where the hub process listens. In Compose the container always listens on 8080; `HUB_PORT` there is only the *published host* port. |
 | `HUB_BIND` | `127.0.0.1` | (compose) which host address the port is published on. |
 | `HUB_PROBE_INTERVAL_MS` | `30000` | How often the hub re-checks each machine is reachable. |
 | `HUB_OFFLINE_AFTER_MS` | `90000` | Heartbeat silence before a machine shows offline. |
@@ -167,12 +169,17 @@ Treat it like a password manager: private network or VPN, HTTPS, a long password
 - **The proxy only talks to a verified machine.** A machine merely *claims* addresses. Before the hub sends anything
   with that machine's credentials to one, an authenticated `GET /v1/machine` must answer with the same machine id.
   A mistyped address, a recycled DHCP lease or a hostile registration therefore cannot aim the proxy at Loki,
-  Postgres or a router. Link-local space (169.254.0.0/16, including cloud metadata, in every IPv6 spelling) is
-  refused outright. The probe uses `/v1/machine`, never `/v1/health` (which starts the agent process).
+  Postgres or a router. An address is trusted only while its last probe succeeded; after a failure it is proven
+  again before a request carrying credentials is sent to it. Link-local space (169.254.0.0/16), the well-known
+  metadata names and the IPv6 forms that carry them (mapped, NAT64, 6to4, AWS's `fd00:ec2::/32`) are refused
+  outright; the identity check is the real barrier. The probe uses `/v1/machine`, never `/v1/health` (which starts
+  the agent process), and has a hard deadline and size limit, so a hostile address cannot stall it.
 - **The proxy is a pipe, not an API.** Only a fixed set of headers cross in each direction; the browser's cookie never
   reaches a machine; a machine's `Set-Cookie` and `WWW-Authenticate` never reach the browser (a machine `401` becomes a
   `502`, so a stale credential cannot pop a native password dialog). Request paths are joined onto the verified origin
-  and re-checked, so `//other-host/x` cannot redirect a request.
+  and re-checked, so `//other-host/x` cannot redirect a request. Machine responses are served under
+  `Content-Security-Policy: sandbox; default-src 'none'`, so an HTML document a machine returns cannot run script
+  on the hub's origin next to the admin session.
 - **Postgres and Loki are not published.** Only the hub is. The image runs as an unprivileged user with a read-only
   root filesystem, no capabilities and `no-new-privileges`.
 - **Machines are trusted with their own logs, not with each other's.** Log labels come from the machine's token, never

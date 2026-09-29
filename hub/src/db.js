@@ -8,14 +8,19 @@ const IDENTIFIER = /^[a-z_][a-z0-9_]{0,62}$/
 // silent string in a JSON API is a worse surprise than a number.
 pg.types.setTypeParser(20, (value) => Number(value))
 
-export function createPool({ databaseUrl, schema }) {
+export function createPool({ databaseUrl, schema, log = () => {} }) {
   const options = { connectionString: databaseUrl, max: 10 }
   if (schema) {
     if (!IDENTIFIER.test(schema)) throw new Error("HUB_DATABASE_SCHEMA must be a lowercase identifier")
     // Lets several test suites share one database without seeing each other's rows.
     options.options = `-c search_path=${schema}`
   }
-  return new pg.Pool(options)
+  const pool = new pg.Pool(options)
+  // Postgres restarting, or a network blip resetting an idle connection, surfaces as an "error" event on
+  // the pool. With no listener Node treats it as an uncaught exception and the hub dies, dropping every
+  // open stream. The pool discards the broken client and connects again on the next query.
+  pool.on("error", (error) => log(`idle database connection failed: ${error.code ?? error.message}`))
+  return pool
 }
 
 /**

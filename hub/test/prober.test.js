@@ -184,3 +184,37 @@ test("probeAll does not overlap itself", { skip: skipDatabase }, async () => {
   await Promise.all([p.probeAll(), p.probeAll(), p.probeAll()])
   assert.equal(peak, 1)
 })
+
+test("a server that drips a body forever cannot hold a probe past its deadline", async () => {
+  const dripper = await serve((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    const timer = setInterval(() => res.write(" "), 30)
+    res.on("close", () => clearInterval(timer))
+  })
+  try {
+    const started = Date.now()
+    const result = await verifyEndpoint({ endpoint: dripper.url, machineId: "x", credentials: { username: "a", password: "b" }, timeoutMs: 300 })
+    assert.equal(result.ok, false)
+    assert.equal(result.error, "timed out")
+    assert.ok(Date.now() - started < 1_500, "the wall-clock deadline applies even though bytes keep arriving")
+  } finally {
+    await dripper.close()
+  }
+})
+
+test("a response bigger than any identity answer is refused without reading it to the end", async () => {
+  const flood = await serve((_req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" })
+    const timer = setInterval(() => res.write("x".repeat(16 * 1024)), 5)
+    res.on("close", () => clearInterval(timer))
+  })
+  try {
+    const started = Date.now()
+    const result = await verifyEndpoint({ endpoint: flood.url, machineId: "x", credentials: { username: "a", password: "b" }, timeoutMs: 5_000 })
+    assert.equal(result.ok, false)
+    assert.match(result.error, /response too large/)
+    assert.ok(Date.now() - started < 2_000)
+  } finally {
+    await flood.close()
+  }
+})

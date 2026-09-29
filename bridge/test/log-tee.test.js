@@ -149,3 +149,73 @@ test("redaction happens before queueing, so a secret never sits in the queue", (
   assert.equal(tee.queue[0].line, "[codex] login with [redacted] failed")
   tee.detach()
 })
+
+test("output that never ends a line is cut into bounded lines instead of piling up (and stays fast)", () => {
+  const tee = new LogTee({ flushPartialMs: 60_000, maxLines: 100_000 })
+  const started = process.hrtime.bigint()
+  // 2 MB of "progress bar" text redrawn with \r and never a newline, in small writes.
+  for (let index = 0; index < 20_000; index += 1) tee.ingest("stdout", `${"#".repeat(99)}\r`)
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6
+  assert.ok(elapsedMs < 1_500, `ingest of newline-free output took ${elapsedMs.toFixed(0)} ms; it must not re-scan what it already holds`)
+  const held = tee.pending.get("stdout")?.length ?? 0
+  assert.ok(held <= 8 * 1024, `the held partial line is bounded (held ${held} characters)`)
+  assert.ok(tee.size > 0, "the cut lines were queued")
+  assert.ok(tee.take(tee.size).every((entry) => entry.line.length <= 8 * 1024 + 20))
+  tee.detach()
+})
+
+test("a very long line is truncated, and a secret inside it is redacted before the cut", () => {
+  const tee = new LogTee({ redact: createRedactor(["hunter2-secret"]) })
+  tee.ingest("stdout", `start hunter2-secret ${"x".repeat(50_000)}\n`)
+  const [entry] = tee.take(1)
+  assert.ok(entry.line.length < 8 * 1024 + 20)
+  assert.match(entry.line, /…\[truncated\]$/)
+  assert.ok(!entry.line.includes("hunter2-secret"))
+  tee.detach()
+})
+
+test("a CRLF split across two writes is still one line ending", () => {
+  const tee = new LogTee({ flushPartialMs: 60_000 })
+  tee.ingest("stdout", "first\r")
+  tee.ingest("stdout", "\nsecond\n")
+  assert.deepEqual(lines(tee), ["first", "second"])
+  tee.detach()
+})
+
+test("takeWithin bounds a batch by size as well as by count, and always makes progress", () => {
+  const tee = new LogTee()
+  for (let index = 0; index < 10; index += 1) tee.ingest("stdout", `${"y".repeat(5_000)}\n`)
+  const batch = tee.takeWithin(500, 12_000)
+  assert.equal(batch.length, 2, "two 5 kB lines fit in 12 kB, a third does not")
+  const one = new LogTee()
+  one.ingest("stdout", `${"z".repeat(5_000)}\n`)
+  assert.equal(one.takeWithin(500, 10).length, 1, "a single line larger than the byte limit still ships alone")
+})
+
+test("redacts the credential shapes that used to slip through", () => {
+  const redact = createRedactor(["s3cret-literal"])
+  const cases = [
+    ['{"authorization":"Bearer abc.def.ghi"}', "abc.def.ghi"],
+    ["authorization=Bearer abc123token", "abc123token"],
+    ["Authorization: Basic aGFybmVzczpwdw==", "aGFybmVzczpwdw"],
+    ["connecting to http://deploy:p4ssw0rd-x@registry.internal:5000/v2", "p4ssw0rd-x"],
+    ["export API_TOKEN=tok_live_1234567890", "tok_live_1234567890"],
+    ['{"apiKey": "k-1234567890abcdef"}', "k-1234567890abcdef"],
+    ['run --password="two words here" --port 4900', "words here"],
+    ["password: hunter2hunter2", "hunter2hunter2"],
+    ["aws key AKIAIOSFODNN7EXAMPLE in env", "AKIAIOSFODNN7EXAMPLE"],
+    ["jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop", "eyJhbGciOiJIUzI1NiJ9"],
+    ["plain s3cret-literal text", "s3cret-literal"]
+  ]
+  for (const [input, secret] of cases) {
+    const output = redact(input)
+    assert.ok(!output.includes(secret), `${JSON.stringify(input)} still contains ${secret}: ${output}`)
+  }
+})
+
+test("redaction leaves ordinary log lines alone", () => {
+  const redact = createRedactor()
+  for (const line of ["[omp] ready to serve sessions", "Harness daemon ready at http://0.0.0.0:4900", "created session fake-1", "GET /v1/machine 200 12ms", "tokens used: 1520 of 200000"]) {
+    assert.equal(redact(line), line)
+  }
+})

@@ -28,7 +28,7 @@ test("localBaseUrl uses loopback for wildcard binds and brackets IPv6", () => {
 test("never contacts an agent that is not already running (listing would wake it)", async () => {
   const gateway = await fakeGateway({})
   try {
-    const sessions = await collectSessions({
+    const { sessions } = await collectSessions({
       config: { ...config, port: gateway.port },
       agents: [{ id: "codex", state: "configured" }, { id: "opencode", state: "unavailable" }],
       scoped: true
@@ -50,7 +50,7 @@ test("reads the lightweight session index of running agents through the scoped r
     "/v1/agents/codex/session/status": { body: { s2: { type: "waiting" } } }
   })
   try {
-    const sessions = await collectSessions({ config: { ...config, port: gateway.port }, agents: [{ id: "codex", state: "available" }], scoped: true })
+    const { sessions } = await collectSessions({ config: { ...config, port: gateway.port }, agents: [{ id: "codex", state: "available" }], scoped: true })
     assert.deepEqual(sessions, [
       { agentId: "codex", id: "s1", title: "Fix bug", directory: "/repo", status: "busy", createdAt: 1_700_000_000_000, updatedAt: 1_700_000_100_000 },
       { agentId: "codex", id: "s2", title: "Docs", directory: "/docs", status: "waiting", createdAt: undefined, updatedAt: 1_700_000_200_000 }
@@ -65,7 +65,7 @@ test("reads the lightweight session index of running agents through the scoped r
 test("single-backend gateways have no agent prefix", async () => {
   const gateway = await fakeGateway({ "/experimental/session": { body: [{ id: "only", title: "T", status: "idle" }] }, "/session/status": { body: {} } })
   try {
-    const sessions = await collectSessions({ config: { ...config, username: "", port: gateway.port }, agents: [{ id: "omp", state: "available" }], scoped: false })
+    const { sessions } = await collectSessions({ config: { ...config, username: "", port: gateway.port }, agents: [{ id: "omp", state: "available" }], scoped: false })
     assert.equal(sessions[0].status, "idle", "a bare-string status is accepted too")
     assert.equal(gateway.seen[0].authorization, undefined, "no credentials configured, none sent")
   } finally {
@@ -79,7 +79,7 @@ test("one agent failing does not hide the others, and a status failure is not fa
     "/v1/agents/b/experimental/session": { body: [{ id: "b1", status: { type: "idle" } }] }
   })
   try {
-    const sessions = await collectSessions({
+    const { sessions } = await collectSessions({
       config: { ...config, port: gateway.port },
       agents: [{ id: "a", state: "available" }, { id: "b", state: "available" }, { id: "c", state: "available" }],
       scoped: true
@@ -91,7 +91,7 @@ test("one agent failing does not hide the others, and a status failure is not fa
 })
 
 test("an unreachable gateway yields an empty inventory rather than an exception", async () => {
-  const sessions = await collectSessions({ config: { ...config, port: 1 }, agents: [{ id: "codex", state: "available" }], scoped: true })
+  const { sessions } = await collectSessions({ config: { ...config, port: 1 }, agents: [{ id: "codex", state: "available" }], scoped: true })
   assert.deepEqual(sessions, [])
 })
 
@@ -99,8 +99,42 @@ test("caps how many sessions one agent can report", async () => {
   const many = Array.from({ length: 500 }, (_, index) => ({ id: `s${index}`, status: "idle" }))
   const gateway = await fakeGateway({ "/experimental/session": { body: many }, "/session/status": { body: {} } })
   try {
-    const sessions = await collectSessions({ config: { ...config, port: gateway.port }, agents: [{ id: "x", state: "available" }], scoped: false })
+    const { sessions } = await collectSessions({ config: { ...config, port: gateway.port }, agents: [{ id: "x", state: "available" }], scoped: false })
     assert.equal(sessions.length, 200)
+  } finally {
+    await gateway.close()
+  }
+})
+
+test("reports which agents' lists were complete: a list at the cap or with a next page is not", async () => {
+  const many = Array.from({ length: 201 }, (_, index) => ({ id: `s${index}`, status: "idle" }))
+  const gateway = await fakeGateway({
+    "/v1/agents/small/experimental/session": { body: [{ id: "a", status: "idle" }] },
+    "/v1/agents/small/session/status": { body: {} },
+    "/v1/agents/big/experimental/session": { body: many },
+    "/v1/agents/big/session/status": { body: {} }
+  })
+  try {
+    const { completeAgents } = await collectSessions({
+      config: { ...config, port: gateway.port },
+      agents: [{ id: "small", state: "available" }, { id: "big", state: "available" }, { id: "asleep", state: "configured" }],
+      scoped: true
+    })
+    assert.deepEqual(completeAgents, ["small"], "the truncated agent and the sleeping agent must not be treated as complete")
+  } finally {
+    await gateway.close()
+  }
+})
+
+test("clips oversized titles and directories so a heartbeat cannot be refused for size", async () => {
+  const gateway = await fakeGateway({
+    "/experimental/session": { body: [{ id: "s", title: "T".repeat(5_000), directory: `/${"d".repeat(5_000)}` }] },
+    "/session/status": { body: {} }
+  })
+  try {
+    const { sessions } = await collectSessions({ config: { ...config, port: gateway.port }, agents: [{ id: "x", state: "available" }], scoped: false })
+    assert.equal(sessions[0].title.length, 300)
+    assert.equal(sessions[0].directory.length, 1024)
   } finally {
     await gateway.close()
   }
