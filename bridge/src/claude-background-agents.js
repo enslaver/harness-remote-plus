@@ -313,8 +313,20 @@ export function runCommand(command, args, { cwd, environment, timeoutMs = ACTION
   })
 }
 
+// On Windows a command that is not a native .exe is run through cmd.exe, which does not fail with ENOENT when
+// the program is missing: it prints this and exits 1 (or 9009 from some shells). Without recognising it, "Claude
+// Code is not installed" would look like a failure, and the "not installed" answer would never be remembered.
+const CMD_NOT_RECOGNIZED = /is not recognized as an internal or external command/i
+
+export function commandNotFound(result) {
+  if (result?.error?.code === "ENOENT") return true
+  if (!result || result.error) return false
+  if (result.code === 9009) return true
+  return result.code !== 0 && CMD_NOT_RECOGNIZED.test(`${result.stderr ?? ""}\n${result.stdout ?? ""}`)
+}
+
 function failureFrom(result, fallbackMessage) {
-  if (result.error?.code === "ENOENT") {
+  if (commandNotFound(result)) {
     return serviceError("claude_not_found", "The `claude` command was not found on this machine. Install Claude Code, or set HARNESS_REMOTE_CLAUDE_COMMAND.", { status: 503 })
   }
   if (result.error?.code && result.error.code !== "ENOENT" && typeof result.error.status === "number") return result.error
@@ -359,7 +371,7 @@ export function createBackgroundAgentService({
 
   async function fetchList(all) {
     const result = await invoke(["agents", "--json", ...(all ? ["--all"] : [])], { timeoutMs: LIST_TIMEOUT_MS, maxBytes: LIST_MAX_BYTES })
-    if (result.error?.code === "ENOENT") return { available: false, reason: "claude_not_found", agents: [] }
+    if (commandNotFound(result)) return { available: false, reason: "claude_not_found", agents: [] }
     if (result.error || result.timedOut || result.code !== 0) {
       const failure = failureFrom(result, "`claude agents --json` failed")
       // An older Claude Code has no `agents` command. That is "not supported here", not an outage.

@@ -10,6 +10,7 @@ import {
   agentActivity,
   claudeInvocation,
   childEnvironment,
+  commandNotFound,
   createBackgroundAgentService,
   normalizeAgent,
   parseAgentsJson,
@@ -478,4 +479,30 @@ test("against the real `claude agents --json`: job records on disk come out as t
   } finally {
     await rm(home, { recursive: true, force: true })
   }
+})
+
+test("a missing program is recognised however the platform reports it (ENOENT, or cmd.exe's own message)", async () => {
+  assert.equal(commandNotFound({ error: Object.assign(new Error("spawn claude ENOENT"), { code: "ENOENT" }) }), true)
+  assert.equal(commandNotFound({ code: 1, stdout: "", stderr: "'claude' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n" }), true, "cmd.exe exits 1 with this text")
+  assert.equal(commandNotFound({ code: 9009, stdout: "", stderr: "" }), true)
+  // Not the same thing: a program that ran and failed, or timed out, is a failure, not "not installed".
+  assert.equal(commandNotFound({ code: 1, stdout: "", stderr: "error: unknown command 'agents'" }), false)
+  assert.equal(commandNotFound({ code: 0, stdout: "[]", stderr: "" }), false)
+  assert.equal(commandNotFound({ code: 1, stdout: "", stderr: "the word 'recognized' alone is fine" }), false)
+  assert.equal(commandNotFound({ error: Object.assign(new Error("boom"), { code: "EACCES" }) }), false)
+  assert.equal(commandNotFound(undefined), false)
+
+  // End to end through the service, with the run function answering as cmd.exe does: unavailable, and remembered.
+  let runs = 0
+  const service = createBackgroundAgentService({
+    command: "claude",
+    configDirectory: os.tmpdir(),
+    run: async () => { runs += 1; return { code: 1, stdout: "", stderr: "'claude' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n" } }
+  })
+  const first = await service.list()
+  assert.deepEqual([first.available, first.reason, first.agents], [false, "claude_not_found", []])
+  await service.list({ all: false })
+  await service.list()
+  assert.equal(runs, 1, "the negative answer is remembered (a machine without Claude is not asked again for minutes)")
+  await assert.rejects(() => service.start({ prompt: "hi", directory: os.tmpdir() }), (error) => error.code === "claude_not_found" && error.status === 503)
 })
