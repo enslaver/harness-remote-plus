@@ -238,6 +238,9 @@ try {
   await shot(page, "02f-background-agent-running")
   await page.getByRole("button", { name: "Output", exact: true }).click()
   await page.locator(".hr-bg-agent-logs pre").waitFor({ state: "visible" })
+  // The box opens straight away with a placeholder while the output is fetched through the hub, so wait for
+  // the text itself; reading it once raced the request on a slower machine.
+  await page.waitForFunction(() => /running the type checker/.test(document.querySelector(".hr-bg-agent-logs pre")?.textContent ?? ""), null, { timeout: 15_000 }).catch(() => {})
   check("attach: its terminal output is shown", /running the type checker/.test(await page.locator(".hr-bg-agent-logs pre").textContent()))
   check("attach: a read-only Session has one Stop (the bar's), not a second that would abort the wrong thing", (await page.getByRole("button", { name: "Stop", exact: true }).count()) === 1)
   await page.locator(".hr-bg-agent-actions").getByRole("button", { name: "Stop", exact: true }).click()
