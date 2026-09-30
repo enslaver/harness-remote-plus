@@ -160,7 +160,7 @@ export type TaskCheckpointRestoreResponse = {
 }
 
 type TaskRequestOptions = {
-  method?: "GET" | "POST" | "PATCH"
+  method?: "GET" | "POST" | "PATCH" | "DELETE"
   body?: unknown
 }
 
@@ -308,7 +308,7 @@ function unauthorizedDetail(config: ServerConfig): string {
     : "HTTP 401: this server requires a username and password, and none were sent."
 }
 
-async function machineRequest<T>(config: ServerConfig, path: string, options: TaskRequestOptions = {}): Promise<T> {
+export async function machineRequest<T>(config: ServerConfig, path: string, options: TaskRequestOptions = {}): Promise<T> {
   const method = options.method ?? "GET"
   if (isDesktopPlatform()) {
     const result = await desktopRequestResult(config, { path, method, body: options.body })

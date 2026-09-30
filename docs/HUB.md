@@ -69,6 +69,9 @@ state, and the Session inventory.
 - **Sessions are only listed for agents that are already running.** Harnesses start lazily on purpose; listing a
   sleeping one would wake it, and a monitor that starts every agent on every machine every 30 seconds would be
   worse than none. An agent nobody has used yet simply has no sessions to report.
+- **What each Session is doing and when.** Every Session carries an `activity` (working, needs you, idle, completed,
+  failed, stopped), when it **started** and when it **last ran**, and Claude Code **background agents** are reported
+  as Sessions of kind `background`. All of it is searchable; see [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md).
 - **Transcripts are never read.** The inventory comes from the same lightweight index the web app uses for its
   Session list.
 - **Logs** are what the daemon prints, tapped from stdout/stderr. Lines are scrubbed of the gateway password, hub
@@ -110,8 +113,10 @@ uses a local CA, which is enough to try the setup on the same computer but is **
 **Your own reverse proxy** (nginx, Traefik, …): forward to `hub:8080`, disable response buffering for `/m/`
 (server-sent events), and set `HUB_TRUST_PROXY=1`.
 
-`HUB_TRUST_PROXY=1` makes the hub believe `X-Forwarded-Proto`/`-For`/`-Host`. Anyone who can reach the hub *directly*
-can forge them, so set it only when the proxy is the only way in.
+`HUB_TRUST_PROXY=1` makes the hub believe `X-Forwarded-Proto`/`-For`/`-Host`, taking the **last** entry of each: the one
+the proxy in front of the hub appended itself, since an appending proxy (nginx's `$proxy_add_x_forwarded_for`) leaves
+whatever the client sent in front. It trusts exactly one proxy hop. Anyone who can reach the hub *directly* can forge
+the headers, so set it only when the proxy is the only way in.
 
 ### Add to Home Screen
 
@@ -134,7 +139,7 @@ secret can instead be given as `NAME_FILE=/path` (Docker/Kubernetes secrets).
 | `HUB_PUBLIC_URL` | derived | The address people and machines use; shown in install commands. |
 | `HUB_TRUST_PROXY` | `0` | See above. |
 | `HUB_INSTALL_COMMAND` | `npx --yes github:enslaver/harness-remote-plus` | What the console tells people to run. |
-| `HUB_PORT` / `HUB_HOST` | `8080` / `0.0.0.0` | Inside the container. |
+| `HUB_PORT` / `HUB_HOST` | `8080` / `0.0.0.0` | Where the hub process listens. In Compose the container always listens on 8080; `HUB_PORT` there is only the *published host* port. |
 | `HUB_BIND` | `127.0.0.1` | (compose) which host address the port is published on. |
 | `HUB_PROBE_INTERVAL_MS` | `30000` | How often the hub re-checks each machine is reachable. |
 | `HUB_OFFLINE_AFTER_MS` | `90000` | Heartbeat silence before a machine shows offline. |
@@ -167,12 +172,17 @@ Treat it like a password manager: private network or VPN, HTTPS, a long password
 - **The proxy only talks to a verified machine.** A machine merely *claims* addresses. Before the hub sends anything
   with that machine's credentials to one, an authenticated `GET /v1/machine` must answer with the same machine id.
   A mistyped address, a recycled DHCP lease or a hostile registration therefore cannot aim the proxy at Loki,
-  Postgres or a router. Link-local space (169.254.0.0/16, including cloud metadata, in every IPv6 spelling) is
-  refused outright. The probe uses `/v1/machine`, never `/v1/health` (which starts the agent process).
+  Postgres or a router. An address is trusted only while its last probe succeeded; after a failure it is proven
+  again before a request carrying credentials is sent to it. Link-local space (169.254.0.0/16), the well-known
+  metadata names and the IPv6 forms that carry them (mapped, NAT64, 6to4, AWS's `fd00:ec2::/32`) are refused
+  outright; the identity check is the real barrier. The probe uses `/v1/machine`, never `/v1/health` (which starts
+  the agent process), and has a hard deadline and size limit, so a hostile address cannot stall it.
 - **The proxy is a pipe, not an API.** Only a fixed set of headers cross in each direction; the browser's cookie never
   reaches a machine; a machine's `Set-Cookie` and `WWW-Authenticate` never reach the browser (a machine `401` becomes a
   `502`, so a stale credential cannot pop a native password dialog). Request paths are joined onto the verified origin
-  and re-checked, so `//other-host/x` cannot redirect a request.
+  and re-checked, so `//other-host/x` cannot redirect a request. Machine responses are served under
+  `Content-Security-Policy: sandbox; default-src 'none'`, so an HTML document a machine returns cannot run script
+  on the hub's origin next to the admin session.
 - **Postgres and Loki are not published.** Only the hub is. The image runs as an unprivileged user with a read-only
   root filesystem, no capabilities and `no-new-privileges`.
 - **Machines are trusted with their own logs, not with each other's.** Log labels come from the machine's token, never
@@ -184,7 +194,8 @@ replaces its record). Create expiring, named ones and revoke them when done.
 ## Data and operations
 
 **Postgres** holds current state: `machines` (identity, addresses, sealed credentials, configuration, agent state),
-`machine_config_history`, `sessions`, `enrollment_tokens`. Migrations are forward-only files in `hub/migrations/`,
+`machine_config_history`, `sessions` (with `kind`, `activity`, `started_at`, `last_ran_at`, indexed for search),
+`enrollment_tokens`. Migrations are forward-only files in `hub/migrations/`,
 applied at start under an advisory lock.
 
 **Loki** holds time series, labelled `job=harness-remote`, `kind` (`log`|`event`), `machine_id`, `machine`,
@@ -234,10 +245,11 @@ All JSON over HTTP(S). Machine calls carry `Authorization: Bearer <token>`.
 | Call | Auth | Purpose |
 | --- | --- | --- |
 | `POST /api/v1/machines/enroll` | enrollment token | Register (or re-register) a machine; returns its own token and the heartbeat interval. |
-| `POST /api/v1/machines/heartbeat` | machine token | Identity, addresses, configuration, agents, Sessions, stats. Answers `needCredentials` if the hub has none. |
+| `POST /api/v1/machines/heartbeat` | machine token | Identity, addresses, configuration, agents, Sessions (`kind`, `activity`, `startedAt`, `lastRanAt`), `sessionAgents` (the agents whose list is complete, so a missing Session can be marked *gone*), stats. Answers `needCredentials` if the hub has none. |
 | `POST /api/v1/ingest/logs` | machine token | Up to 1000 lines per batch. `503` = keep the batch; `501` = the hub stores no logs, stop buffering. |
 | `GET /api/v1/bootstrap` | cookie | What the web app needs. Signed out: `200 {hub:true, authenticated:false}`. |
-| `GET /api/v1/machines`, `/sessions`, `/logs`, … | cookie | The console's API. |
+| `GET /api/v1/machines`, `/logs`, … | cookie | The console's API. |
+| `GET /api/v1/sessions?q=&activity=&kind=&ranAfter=&startedAfter=&sort=&limit=&offset=` | cookie | Session search across machines; `total` for paging. See [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md#the-hub-when-a-session-started-when-it-last-ran-and-search). |
 | `ANY /m/<machineId>/…` | cookie | Same-origin proxy to a verified machine. |
 
 ## Developing the hub

@@ -1,9 +1,10 @@
 import http from "node:http"
-import { readdir, realpath } from "node:fs/promises"
+import { readdir } from "node:fs/promises"
 import path from "node:path"
 import { selectableAcpModelValue } from "./agent-model-catalog.js"
 import { AcpPromptEchoFilter } from "./acp-prompt-echo-filter.js"
 import { AcpService } from "./acp-service.js"
+import { allowedDirectory } from "./allowed-directory.js"
 import { harnessProfile } from "./harness-profiles.js"
 import { allowedOrigin, applyCorsHeaders, matchesCredentials, writeJSON } from "./http-policy.js"
 
@@ -94,15 +95,6 @@ async function readBody(request) {
 
 function writeSSE(response, event, data) {
   response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-}
-
-async function allowedDirectory(candidate, config) {
-  const resolved = await realpath(candidate)
-  const roots = await Promise.all((config.roots.length ? config.roots : [process.cwd()]).map((root) => realpath(root)))
-  if (!roots.some((root) => resolved === root || !path.relative(root, resolved).startsWith(`..${path.sep}`) && path.relative(root, resolved) !== "..")) {
-    throw new Error("Directory is outside the configured --root boundary")
-  }
-  return resolved
 }
 
 function modelWireName(model) {

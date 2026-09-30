@@ -107,6 +107,8 @@ The hub URL is remembered, so the next `npx harness-remote` reports again on its
 
 - **Native Sessions** — existing Sessions remain owned by Codex, Claude, OpenCode, OMP or PI.
 - **Remote control** — follow activity, send prompts, Stop turns and handle supported questions/permissions.
+- **Status at a glance and grouping** — every Session shows whether it is working, needs you, completed or failed; group the list by status, project, machine or agent, or see one recent feed across everything, with a time window. See [Background agents, status and grouping](docs/BACKGROUND_AGENTS.md).
+- **Claude Code background agents** — see, follow, stop, continue and remove `claude --bg` agents from any device.
 - **One workspace** — Machines → Projects → native Sessions.
 - **Cross-agent continuation** — continue a task with another coding agent without pretending their hidden contexts are the same.
 - **Cross-machine continuation** — continue work on another configured machine while preserving Project identity and lineage.
@@ -211,6 +213,7 @@ npm run electron:dev
 
 - [Quick start](docs/QUICK_START.md)
 - [Hub: Docker stack, registry and logs](docs/HUB.md)
+- [Background agents, agent status and grouping](docs/BACKGROUND_AGENTS.md)
 - [Architecture and roadmap](docs/HARNESS_3_ROADMAP.md)
 - [Capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md)
 - [OpenCode reliability contract](docs/OPENCODE_RELIABILITY_CONTRACT.md)

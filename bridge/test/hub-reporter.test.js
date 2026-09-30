@@ -569,3 +569,57 @@ test("end to end: configured install captures output, redacts it, enrolls, ships
     await hub.close()
   }
 })
+
+test("log batches are bounded by size as well as count, so long lines cannot exceed what the hub accepts", async () => {
+  const t = await setup()
+  try {
+    await t.reporter.start()
+    // 300 lines of ~6 kB is ~1.8 MB: by count alone that is one batch, which the hub would answer with 413.
+    t.tee.ingest("stdout", `${Array.from({ length: 300 }, (_, index) => `${index} ${"w".repeat(6_000)}`).join("\n")}\n`)
+    await t.reporter.flushLogs()
+    const batches = t.hub.of("/ingest/logs")
+    assert.ok(batches.length >= 2, `expected the queue to be split, got ${batches.length} batch(es)`)
+    for (const call of batches) {
+      assert.ok(JSON.stringify(call.body).length < 1_500_000, "every request stays well under the hub's 2 MB body limit")
+    }
+    assert.equal(t.hub.shippedLines().length, 300, "nothing was lost")
+    assert.equal(t.tee.dropped, 0)
+  } finally {
+    await t.done()
+  }
+})
+
+test("the heartbeat says which agents' Session lists were complete", async () => {
+  const t = await setup({ collect: async () => ({ sessions: [{ agentId: "codex", id: "s1", title: "A", directory: "/r", status: "idle" }], completeAgents: ["codex"] }) })
+  try {
+    await t.reporter.start()
+    const [beat] = t.hub.of("/heartbeat")
+    assert.deepEqual(beat.body.sessionAgents, ["codex"])
+    assert.equal(beat.body.sessions[0].id, "s1")
+  } finally {
+    await t.done()
+  }
+})
+
+test("a collector that returns a bare list claims no completeness, so nothing can be marked gone", async () => {
+  const t = await setup()
+  try {
+    await t.reporter.start()
+    assert.deepEqual(t.hub.of("/heartbeat")[0].body.sessionAgents, [])
+  } finally {
+    await t.done()
+  }
+})
+
+test("an inventory too large for the hub is reported as empty instead of making the machine look offline", async () => {
+  const huge = Array.from({ length: 4_000 }, (_, index) => ({ agentId: "codex", id: `s${index}`, title: "t".repeat(300), directory: "d".repeat(1_000), status: "idle" }))
+  const t = await setup({ collect: async () => ({ sessions: huge, completeAgents: ["codex"] }) })
+  try {
+    await t.reporter.start()
+    const [beat] = t.hub.of("/heartbeat")
+    assert.deepEqual(beat.body.sessions, [])
+    assert.deepEqual(beat.body.sessionAgents, [], "an emptied list must not be mistaken for 'every Session is gone'")
+  } finally {
+    await t.done()
+  }
+})

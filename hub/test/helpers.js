@@ -57,8 +57,8 @@ export async function createTestDatabase() {
 }
 
 /** Runs the real router on an ephemeral port and gives tests a tiny fetch wrapper with a cookie jar. */
-export async function startHub({ store, keys, config = testConfig(), sink, loki, prober, now } = {}) {
-  const { server, prober: activeProber } = createHub({ config, store, keys, sink, loki, prober, now })
+export async function startHub({ store, keys, config = testConfig(), sink, loki, prober, now, proxyOptions } = {}) {
+  const { server, prober: activeProber } = createHub({ config, store, keys, sink, loki, prober, now, proxyOptions })
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve))
   const base = `http://127.0.0.1:${server.address().port}`
   let cookie = ""
@@ -170,6 +170,21 @@ export async function startFakeMachine({ id = "machine_fake", username = "harnes
       })
     } else if (url.pathname === "/hang") {
       // never answers
+    } else if (url.pathname === "/slow") {
+      // Answers only after `ms`: how a machine behaves on the first request that wakes a sleeping harness.
+      setTimeout(() => {
+        if (res.destroyed) return
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ slow: true }))
+      }, Number(url.searchParams.get("ms")) || 0)
+    } else if (url.pathname === "/html") {
+      res.writeHead(200, { "Content-Type": "text/html" })
+      res.end("<script>fetch('/api/v1/enrollment-tokens',{method:'POST'})</script>")
+    } else if (url.pathname === "/drip") {
+      // A body that never ends, one byte at a time (a hostile or broken server).
+      res.writeHead(200, { "Content-Type": "application/json" })
+      const timer = setInterval(() => res.write(" "), 50)
+      res.on("close", () => clearInterval(timer))
     } else if (url.pathname === "/forbidden") {
       res.writeHead(403)
       res.end()

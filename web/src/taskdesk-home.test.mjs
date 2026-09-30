@@ -139,7 +139,8 @@ test("Session chat keeps bounded paging live events attention Stop and startup f
   assert.match(chat, /preparingReply/)
   assert.match(chat, /api\.loadQuestions/)
   assert.match(chat, /api\.loadPermissions/)
-  assert.match(chat, /onStop=\{working && interactionEnabled \? stop : undefined\}/)
+  // A read-only Session (a running background agent) has one Stop, the bar's: a second one here would abort the wrong thing.
+  assert.match(chat, /onStop=\{working && interactionEnabled( && !readOnly)? \? stop : undefined\}/)
   assert.match(attentionHome, /loadNativeSessionAttentionIndex/, 'global attention must use the small capability-driven read model')
   assert.match(attentionHome, /startNativeSessionAttentionLiveRefresh/, 'global attention must use a dedicated live controller')
   assert.doesNotMatch(attentionHome, /startTaskDeskSessionLiveRefresh|loadMessagePage|continueConversation|stopConversation/, 'global attention events must not read transcripts or invoke Session writers')

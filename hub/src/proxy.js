@@ -21,8 +21,17 @@ const FORWARD_REQUEST = ["accept", "content-type", "content-length", "x-harness-
 // it makes the browser throw up its native password dialog for a credential the user never had).
 const FORWARD_RESPONSE = ["content-type", "content-length", "x-next-cursor", "x-has-more", "x-session-model", "etag", "last-modified"]
 
+// Connecting is quick or it is not going to happen. Waiting for the *response* is a different matter: a
+// machine legitimately takes a long time to answer the first request that wakes a sleeping harness
+// (its ACP adapter may take up to 90 s to start), so the header wait is as generous as the idle limit.
 const CONNECT_TIMEOUT_MS = 8_000
 const IDLE_TIMEOUT_MS = 120_000
+
+// Everything a machine sends back is served from the hub's own origin, next to the admin console and the
+// admin's session cookie. `sandbox` gives such a response an opaque origin with no scripting, so a
+// hostile machine returning `text/html` cannot run script as the admin; `default-src 'none'` stops it
+// loading anything either. JSON and event streams are unaffected.
+const PROXIED_RESPONSE_HEADERS = Object.freeze({ "Content-Security-Policy": "sandbox; default-src 'none'" })
 
 const agents = {
   "http:": new http.Agent({ keepAlive: true, maxSockets: 128 }),
@@ -55,7 +64,16 @@ export function upstreamUrl(endpoint, rest, search) {
   return target
 }
 
-export function createMachineProxy({ store, config, sink, prober, log = () => {} }) {
+export function createMachineProxy({
+  store,
+  config,
+  sink,
+  prober,
+  log = () => {},
+  connectTimeoutMs = CONNECT_TIMEOUT_MS,
+  headerTimeoutMs = IDLE_TIMEOUT_MS,
+  idleTimeoutMs = IDLE_TIMEOUT_MS
+}) {
   return async function proxy({ req, res, url, id, rest }) {
     const started = Date.now()
     const method = req.method ?? "GET"
@@ -67,9 +85,12 @@ export function createMachineProxy({ store, config, sink, prober, log = () => {}
       throw new HttpError(409, "proxy_disabled", "This machine did not share credentials with the hub, so it cannot be opened here")
     }
 
-    let endpoint = target.verified_endpoint
+    // A verified address is only trusted while the last probe of it succeeded. After a failed probe the
+    // address may belong to another device by now (a recycled DHCP lease), and this request would carry
+    // the machine's credentials to it; prove the address again first.
+    let endpoint = target.last_probe_ok === false ? null : target.verified_endpoint
     if (!endpoint) {
-      // First use (or right after an address change): prove the address now rather than make the user wait a cycle.
+      // First use, right after an address change, or after a failed probe: prove the address now rather than make the user wait a cycle.
       const probe = await prober.probeMachine(id)
       if (!probe.ok) throw new HttpError(502, "machine_unreachable", `The hub cannot reach this machine: ${probe.error}`)
       endpoint = probe.endpoint
@@ -107,7 +128,7 @@ export function createMachineProxy({ store, config, sink, prober, log = () => {}
         resolve()
       }
 
-      upstreamReq = transport.request(upstream, { method, headers, agent: agents[upstream.protocol], timeout: CONNECT_TIMEOUT_MS }, (upstreamRes) => {
+      upstreamReq = transport.request(upstream, { method, headers, agent: agents[upstream.protocol] }, (upstreamRes) => {
         if (upstreamRes.statusCode === 401 || upstreamRes.statusCode === 403) {
           upstreamRes.resume()
           fail(502, "machine_auth_failed", "The machine rejected the credentials the hub holds for it. Restart its Harness Remote gateway so it registers again.")
@@ -117,8 +138,8 @@ export function createMachineProxy({ store, config, sink, prober, log = () => {}
         const type = String(upstreamRes.headers["content-type"] ?? "")
         streaming = type.startsWith("text/event-stream")
         // Connect timeout is over. A stream may sit silent between events; a plain response may not stall.
-        upstreamReq.setTimeout(streaming ? 0 : IDLE_TIMEOUT_MS)
-        const out = { ...BASE_HEADERS, "Cache-Control": streaming ? "no-cache, no-transform" : "no-store" }
+        upstreamReq.setTimeout(streaming ? 0 : idleTimeoutMs)
+        const out = { ...BASE_HEADERS, ...PROXIED_RESPONSE_HEADERS, "Cache-Control": streaming ? "no-cache, no-transform" : "no-store" }
         for (const name of FORWARD_RESPONSE) {
           if (upstreamRes.headers[name] === undefined) continue
           // A stream has no length; forwarding one from a proxy that re-frames it would truncate it.
@@ -142,12 +163,30 @@ export function createMachineProxy({ store, config, sink, prober, log = () => {}
         })
       })
 
+      // Two different clocks: a short one while the connection is being made, then a long one for the
+      // response. (`timeout` on the request options would apply one value to both and cut a slow
+      // first response short at the connect limit.)
+      upstreamReq.on("socket", (socket) => {
+        if (socket.connecting) {
+          upstreamReq.setTimeout(connectTimeoutMs)
+          socket.once("connect", () => upstreamReq.setTimeout(headerTimeoutMs))
+        } else {
+          upstreamReq.setTimeout(headerTimeoutMs)
+        }
+      })
       upstreamReq.on("timeout", () => {
         upstreamReq.destroy()
         fail(504, "machine_timeout", "The machine did not answer in time")
       })
       upstreamReq.on("error", (error) => {
         if (res.writableEnded || finished) return resolve()
+        if (res.destroyed) {
+          // The browser went away first (a fetch aborted on unmount, an iOS tab suspended). The reset we
+          // see is our own doing; recording it as a machine outage would fill the logs with false alarms.
+          if (method !== "GET") audit(499, { closed: "client" })
+          else finished = true
+          return resolve()
+        }
         log(`proxy to ${id} failed: ${error.code ?? error.message}`)
         fail(502, "machine_unreachable", `The hub cannot reach this machine (${error.code ?? "network error"})`)
       })

@@ -1,4 +1,4 @@
-import { ago, clip, clock, h, installCommands, parseRoute, pretty, proxyState, safeNext, sessionTone } from "./util.js"
+import { ACTIVITY_LABELS, ACTIVITY_ORDER, activityLabel, activityTone, ago, clip, clock, GROUP_BY_LABELS, groupSessions, h, installCommands, parseRoute, pretty, proxyState, RAN_WINDOWS, safeNext, sessionSearchParams, sessionTone, STARTED_WINDOWS } from "./util.js"
 
 const app = document.getElementById("app")
 let hub = { name: "Harness Remote Hub", publicUrl: location.origin, installCommand: "npx --yes github:enslaver/harness-remote-plus" }
@@ -274,10 +274,24 @@ function machinesView() {
   return controller
 }
 
+function absolute(value) {
+  const ms = value ? Date.parse(value) : NaN
+  return Number.isFinite(ms) ? new Date(ms).toLocaleString() : ""
+}
+
 function sessionCard(session, showMachine) {
-  return h("div", { class: "card" },
-    h("div", { class: "row" }, h("strong", { class: "grow" }, clip(session.title || "Untitled session", 140)), statusPill(session.status)),
-    h("div", { class: "meta" }, [showMachine ? session.machineName : "", session.agentId, ago(session.updatedAt || session.lastSeenAt)].filter(Boolean).join(" · ")),
+  const ran = session.lastRanAt || session.updatedAt
+  return h("div", { class: "card session", "data-activity": session.activity },
+    h("div", { class: "row wrap" },
+      h("strong", { class: "grow" }, clip(session.title || "Untitled session", 140)),
+      session.kind === "background" ? h("span", { class: "pill pending", title: "A Claude Code background agent" }, "Background") : null,
+      h("span", { class: "pill " + activityTone(session.activity), title: "Harness status: " + (session.status || "unknown") }, activityLabel(session.activity))),
+    session.activity === "needs_input" && session.detail ? h("div", { class: "small" }, session.detail) : null,
+    h("div", { class: "meta" }, [showMachine ? session.machineName : "", session.agentId].filter(Boolean).join(" · ")),
+    h("div", { class: "meta times" },
+      h("span", { title: absolute(session.startedAt) }, session.startedAt ? "Started " + ago(session.startedAt) : "Start time unknown"),
+      " · ",
+      h("span", { title: absolute(ran) }, ran ? "Last ran " + ago(ran) : "Not run yet")),
     session.directory ? h("div", { class: "mono muted small" }, session.directory) : null)
 }
 
@@ -373,41 +387,103 @@ function machineView(id) {
 
 // ---- sessions ------------------------------------------------------------------------------------
 
+const GROUP_BY_KEY = "hub.sessions.groupBy"
+function rememberedGroupBy() {
+  try {
+    const value = window.localStorage.getItem(GROUP_BY_KEY)
+    return Object.prototype.hasOwnProperty.call(GROUP_BY_LABELS, value) ? value : "none"
+  } catch (error) {
+    return "none"
+  }
+}
+
 function sessionsView() {
   const status = h("div")
-  const query = h("input", { id: "q", type: "search", placeholder: "Title or folder", enterkeyhint: "search", autocomplete: "off" })
-  const stateFilter = h("select", { id: "state" }, [["", "Any status"], ["active", "Active"], ["waiting", "Needs attention"], ["idle", "Idle"]].map(([value, label]) => h("option", { value }, label)))
-  const machineFilter = h("select", { id: "machine" }, h("option", { value: "" }, "All machines"))
+  const query = h("input", { id: "q", type: "search", placeholder: "Title, folder, machine or id", enterkeyhint: "search", autocomplete: "off" })
+  const option = (value, label) => h("option", { value }, label)
+  const activityFilter = h("select", { id: "activity" }, [["", "Any status"], ["active", "Working or needs you"]].concat(ACTIVITY_ORDER.filter((a) => a !== "unknown").map((a) => [a, ACTIVITY_LABELS[a]])).map(([value, label]) => option(value, label)))
+  const machineFilter = h("select", { id: "machine" }, option("", "All machines"))
+  const agentFilter = h("select", { id: "agent" }, option("", "All agents"))
+  const kindFilter = h("select", { id: "kind" }, [["", "Sessions and background agents"], ["background", "Background agents only"], ["session", "Sessions only"]].map(([value, label]) => option(value, label)))
+  const ranFilter = h("select", { id: "ran" }, RAN_WINDOWS.map(([value, label]) => option(value, label)))
+  const startedFilter = h("select", { id: "started" }, STARTED_WINDOWS.map(([value, label]) => option(value, label)))
+  const sortFilter = h("select", { id: "sort" }, [["last_ran", "Most recently run"], ["started", "Most recently started"]].map(([value, label]) => option(value, label)))
+  const groupFilter = h("select", { id: "groupby" }, Object.keys(GROUP_BY_LABELS).map((value) => option(value, GROUP_BY_LABELS[value])))
+  groupFilter.value = rememberedGroupBy()
+  const summary = h("p", { class: "small muted", role: "status" })
+  const moreSummary = h("summary", {}, "More filters")
+  const moreFilters = h("details", { class: "more", open: window.matchMedia && window.matchMedia("(min-width: 700px)").matches },
+    moreSummary,
+    h("div", { class: "filters" },
+      h("div", { class: "field" }, h("label", { for: "machine" }, "Machine"), machineFilter),
+      h("div", { class: "field" }, h("label", { for: "agent" }, "Agent"), agentFilter),
+      h("div", { class: "field" }, h("label", { for: "kind" }, "Kind"), kindFilter),
+      h("div", { class: "field" }, h("label", { for: "ran" }, "Last ran"), ranFilter),
+      h("div", { class: "field" }, h("label", { for: "started" }, "Started"), startedFilter),
+      h("div", { class: "field" }, h("label", { for: "sort" }, "Sort by"), sortFilter)))
+  const updateMoreSummary = () => {
+    const active = [machineFilter, agentFilter, kindFilter, ranFilter, startedFilter].filter((select) => select.value).length + (sortFilter.value !== "last_ran" ? 1 : 0)
+    moreSummary.textContent = active ? "More filters (" + active + " on)" : "More filters"
+  }
   const list = h("div", { class: "stack" })
   let debounce = null
+  const field = (id, label, control, wide) => h("div", { class: "field" + (wide ? " wide" : "") }, h("label", { for: id }, label), control)
   const controller = {
     title: "Sessions",
     banner: status,
     refreshMs: 10000,
     node: h("section", {}, h("h1", { class: "sr-only" }, "Sessions"), status,
       h("div", { class: "filters" },
-        h("div", { class: "field wide" }, h("label", { for: "q" }, "Search"), query),
-        h("div", { class: "field" }, h("label", { for: "state" }, "Status"), stateFilter),
-        h("div", { class: "field" }, h("label", { for: "machine" }, "Machine"), machineFilter)),
+        field("q", "Search", query, true),
+        field("activity", "Status", activityFilter),
+        field("groupby", "Group by", groupFilter)),
+      // The rest are folded away on a phone (five more rows of dropdowns would push the results off the screen)
+      // and open on a wide screen, where there is room.
+      moreFilters,
+      summary,
       list),
     async load() {
       const machines = (await api("/api/v1/machines")).machines
-      const chosen = machineFilter.value
-      machineFilter.replaceChildren(h("option", { value: "" }, "All machines"), ...machines.map((m) => h("option", { value: m.id }, m.name)))
-      machineFilter.value = chosen
-      const params = new URLSearchParams()
-      if (query.value.trim()) params.set("q", query.value.trim())
-      if (stateFilter.value) params.set("status", stateFilter.value)
-      if (machineFilter.value) params.set("machine", machineFilter.value)
-      params.set("limit", "100")
-      const sessions = (await api("/api/v1/sessions?" + params)).sessions
-      list.replaceChildren(...(sessions.length ? sessions.map((s) => sessionCard(s, true)) : [h("div", { class: "empty" }, h("strong", {}, "No sessions match"), h("p", { class: "muted" }, "Sessions appear once a machine reports them."))]))
+      const keep = (select, placeholder, choices) => {
+        const chosen = select.value
+        select.replaceChildren(option("", placeholder), ...choices.map(([value, label]) => option(value, label)))
+        select.value = chosen
+      }
+      keep(machineFilter, "All machines", machines.map((m) => [m.id, m.name]))
+      const agents = {}
+      for (const machine of machines) for (const agent of machine.agents || []) agents[agent.id] = agent.label || agent.id
+      // Claude Code background agents are Claude sessions even where the harness itself is asleep.
+      if (!agents.claude) agents.claude = "Claude Code"
+      keep(agentFilter, "All agents", Object.keys(agents).sort().map((id) => [id, agents[id]]))
+
+      const result = await api("/api/v1/sessions?" + sessionSearchParams({
+        q: query.value, activity: activityFilter.value, machine: machineFilter.value, agent: agentFilter.value, kind: kindFilter.value,
+        ranWithin: ranFilter.value, startedWithin: startedFilter.value, sort: sortFilter.value, limit: 200
+      }))
+      const sessions = result.sessions
+      updateMoreSummary()
+      summary.textContent = sessions.length ? "Showing " + sessions.length + (result.total > sessions.length ? " of " + result.total : "") + (sessions.length === 1 ? " session" : " sessions") : ""
+      if (!sessions.length) {
+        list.replaceChildren(h("div", { class: "empty" }, h("strong", {}, "No sessions match"), h("p", { class: "muted" }, "Sessions appear once a machine reports them. Only agents that are already running are inventoried, so idle harnesses stay asleep.")))
+        return
+      }
+      const by = groupFilter.value
+      if (by === "none") {
+        list.replaceChildren(...sessions.map((s) => sessionCard(s, true)))
+        return
+      }
+      list.replaceChildren(...groupSessions(sessions, by).map((group) =>
+        h("section", { class: "group", "data-activity": group.activity }, h("h2", { class: "group-title" }, group.label, " ", h("span", { class: "muted small" }, "(" + group.sessions.length + ")")),
+          h("div", { class: "stack" }, group.sessions.map((s) => sessionCard(s, by !== "machine"))))))
     }
   }
   const reload = () => controller.refresh && controller.refresh()
   query.addEventListener("input", () => { clearTimeout(debounce); debounce = setTimeout(reload, 250) })
-  stateFilter.addEventListener("change", reload)
-  machineFilter.addEventListener("change", reload)
+  for (const select of [activityFilter, machineFilter, agentFilter, kindFilter, ranFilter, startedFilter, sortFilter]) select.addEventListener("change", reload)
+  groupFilter.addEventListener("change", () => {
+    try { window.localStorage.setItem(GROUP_BY_KEY, groupFilter.value) } catch (error) { /* private mode: just not remembered */ }
+    reload()
+  })
   return controller
 }
 

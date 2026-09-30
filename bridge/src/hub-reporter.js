@@ -9,6 +9,9 @@ const DEFAULT_INTERVAL_MS = 30_000
 const MAX_BACKOFF_MS = 5 * 60_000
 const LOG_INTERVAL_MS = 2_000
 const LOG_BATCH = 500
+// The hub refuses bodies over 2 MB; stay well below it however long the lines are.
+const LOG_BATCH_BYTES = 1024 * 1024
+const HEARTBEAT_MAX_BYTES = 1536 * 1024
 const LOG_MAX_BACKOFF_MS = 60_000
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"])
 
@@ -236,8 +239,16 @@ export class HubReporter {
 
       const agents = this.snapshot().agents
       const shared = this.#shared()
-      const sessions = await this.collect({ config: this.config, agents, scoped: this.scoped }).catch(() => [])
+      const inventory = await this.collect({ config: this.config, agents, scoped: this.scoped }).catch(() => ({ sessions: [], completeAgents: [] }))
+      // An injected collector may still return a bare list; that says nothing about completeness.
+      let { sessions, completeAgents } = Array.isArray(inventory) ? { sessions: inventory, completeAgents: [] } : inventory
       const memory = process.memoryUsage()
+      // The hub refuses an oversized heartbeat outright, which would make a machine with a huge inventory look
+      // offline forever. Better to report no Sessions than to report nothing.
+      if (JSON.stringify(sessions).length > HEARTBEAT_MAX_BYTES) {
+        sessions = []
+        completeAgents = []
+      }
       const response = await this.request(this.#url("/api/v1/machines/heartbeat"), {
         method: "POST",
         headers: { Authorization: `Bearer ${this.machineToken}` },
@@ -251,6 +262,7 @@ export class HubReporter {
           config: shared.config,
           agents: agents.map(({ id, label, backend, transport, state }) => ({ id, label, backend, transport, state })),
           sessions,
+          sessionAgents: completeAgents,
           stats: { uptimeSeconds: Math.round(process.uptime()), rss: memory.rss, heapUsed: memory.heapUsed, droppedLogLines: this.tee?.dropped ?? 0 }
         }
       })
@@ -305,7 +317,7 @@ export class HubReporter {
   async #shipLogs() {
     if (!this.tee || this.logsDisabled || !this.machineToken) return
     while (this.tee.size > 0) {
-      const batch = this.tee.take(LOG_BATCH)
+      const batch = this.tee.takeWithin(LOG_BATCH, LOG_BATCH_BYTES)
       let response
       try {
         response = await this.request(this.#url("/api/v1/ingest/logs"), {

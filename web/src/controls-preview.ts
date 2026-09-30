@@ -48,6 +48,7 @@ import "./session-first-centering-fix.css"
 import "./session-handoff-routing.css"
 import "./machine-pairing.css"
 import "./beautiful-ui-controls.css"
+import "./agent-activity.css"
 import "./ios-safari.css"
 
 /** Same list, same order as `main.tsx` - `beautiful-ui-controls.test.mjs` asserts the two match, so

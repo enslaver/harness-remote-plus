@@ -31,24 +31,38 @@ export function basicAuthorization({ username, password }) {
 function getOnce(url, { headers, timeoutMs }) {
   return new Promise((resolve, reject) => {
     const transport = new URL(url).protocol === "https:" ? https : http
-    const request = transport.request(url, { method: "GET", headers, agent: false, timeout: timeoutMs }, (response) => {
+    let settled = false
+    const done = (fn, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(deadline)
+      fn(value)
+    }
+    const request = transport.request(url, { method: "GET", headers, agent: false }, (response) => {
       const chunks = []
       let size = 0
       response.on("data", (chunk) => {
         size += chunk.length
-        if (size <= MAX_PROBE_BYTES) chunks.push(chunk)
+        // A gateway's identity answer is a few hundred bytes. Something that keeps talking is not one, and
+        // reading it to the end would let a hostile address stall the probe with a slow endless body.
+        if (size > MAX_PROBE_BYTES) return request.destroy(Object.assign(new Error("response too large"), { code: "E2BIG" }))
+        chunks.push(chunk)
       })
-      response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }))
-      response.on("error", reject)
+      response.on("end", () => done(resolve, { status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }))
+      response.on("error", (error) => done(reject, error))
     })
-    request.on("timeout", () => request.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })))
-    request.on("error", reject)
+    // One wall-clock deadline for the whole exchange. `timeout` on the request only measures silence, so a
+    // server dripping a byte a second would keep the probe (and, through `running`, every later probe
+    // cycle) alive forever.
+    const deadline = setTimeout(() => request.destroy(Object.assign(new Error("timed out"), { code: "ETIMEDOUT" })), timeoutMs)
+    request.on("error", (error) => done(reject, error))
     request.end()
   })
 }
 
 function describe(error) {
   if (error?.code === "ETIMEDOUT") return "timed out"
+  if (error?.code === "E2BIG") return "not a Harness gateway (response too large)"
   return error?.code ? String(error.code) : (error?.message ?? "unreachable")
 }
 

@@ -272,3 +272,27 @@ test("pruneSessions removes only long-unseen sessions", { skip: skipDatabase }, 
   assert.equal(await store.pruneSessions(90) >= 1, true)
   assert.deepEqual((await store.listSessions({ machineId: "m-prune" })).map((row) => row.session_id), ["new"])
 })
+
+test("a Session the machine stops listing is marked gone, but only for agents whose list was complete", { skip: skipDatabase }, async () => {
+  await store.enrollMachine(enrollment("m-gone"))
+  const send = (sessions, sessionAgents) => store.recordHeartbeat("m-gone", heartbeat({ info: machineInfo({ id: "m-gone" }), sessions, sessionAgents }))
+  const other = (id, status = "idle") => session(id, status, { agent_id: "omp" })
+
+  await send([session("a", "busy"), session("b", "idle"), other("o1", "busy")], ["codex", "omp"])
+  await send([session("b", "idle")], ["codex"])
+  const rows = Object.fromEntries((await store.listSessions({ machineId: "m-gone" })).map((row) => [`${row.agent_id}:${row.session_id}`, row.status]))
+  assert.equal(rows["codex:a"], "gone", "listed before, absent from a complete list: gone")
+  assert.equal(rows["codex:b"], "idle")
+  assert.equal(rows["omp:o1"], "busy", "omp was not part of that list, so nothing is concluded about it")
+
+  const active = (await store.listMachines()).find((machine) => machine.id === "m-gone")
+  assert.equal(Number(active.session_active), 1, "a gone Session no longer counts as active (only omp:o1 does)")
+
+  // Without a completeness claim nothing is ever marked gone.
+  await send([], [])
+  assert.equal((await store.listSessions({ machineId: "m-gone" })).find((row) => row.session_id === "b").status, "idle")
+
+  // A Session that comes back is live again.
+  await send([session("a", "busy")], ["codex"])
+  assert.equal((await store.listSessions({ machineId: "m-gone" })).find((row) => row.session_id === "a").status, "busy")
+})

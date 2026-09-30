@@ -98,13 +98,16 @@ adds these (CI runs all of them; the database suites need a Postgres and skip wi
 cd hub && npm ci
 HUB_TEST_DATABASE_URL=postgres://hub:hub@127.0.0.1:5432/hub npm test   # add HUB_TEST_LOKI_URL=… for real Loki
 npm run smoke:ui && npm run smoke:app     # console + built web app in Chromium with an iPhone profile (needs web/dist)
+                                          # smoke:app also drives the Session rail's grouping and a background agent
+
+cd ../web && npm run test:agents           # rail grouping, activity vocabulary, background-agent client (part of test:ci:full)
 
 cd .. && sh deploy/init-env.sh && docker compose up -d --build --wait
 node hub/scripts/e2e-stack.mjs            # a real machine daemon against the real stack
 ```
 
 `npm run build` is `tsc -b && vite build`, so it type-checks as well as bundles. Packaging workflows
-use narrower named tiers where appropriate (`test:ci:baseline`, `test:ci:pages`, and
+use narrower named tiers where appropriate (`test:ci:baseline` and
 `test:ci:desktop`) while PR validation uses `test:ci:full`.
 
 ## Product and compatibility rules
@@ -240,8 +243,7 @@ Before calling a release complete, verify all of these independently:
 - the `vX.Y.Z` annotated tag points at the release commit;
 - the tag annotation is non-empty;
 - the Android tagged workflow publishes the GitHub Release and signed APK;
-- the Desktop tagged workflow attaches Windows/macOS/Linux artifacts;
-- hosted GitHub Pages deployment is green.
+- the Desktop tagged workflow attaches Windows/macOS/Linux artifacts.
 
 Do not manually move or recreate an already-published release tag to fix packaging. Fix the workflow
 or release metadata, then rerun the builders against the existing immutable tag whenever possible.

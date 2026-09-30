@@ -15,15 +15,31 @@
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
 const SOURCE_PREFIX = /^\[([A-Za-z0-9_-]{1,32})\]/
+// A single log line is never worth more than this on the wire; anything longer is a dump or a runaway
+// progress bar. Newline-free output is cut into lines of this size instead of being held forever.
+export const MAX_LINE_CHARS = 8 * 1024
+// Redaction runs before the final cut, so cap what it has to scan for one absurdly long line.
+const REDACT_SCAN_CHARS = 64 * 1024
+
+const SECRET_WORD = "(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)"
 
 const PATTERNS = [
-  [/(Authorization:\s*)(Basic|Bearer)\s+\S+/gi, "$1$2 [redacted]"],
-  [/(--(?:password|hub-token)(?:=|\s+))\S+/gi, "$1[redacted]"],
+  // Authorization headers, also as JSON (`"authorization":"Bearer x"`) or `authorization=Bearer x`.
+  [/(authorization["']?\s*[:=]\s*["']?)(Basic|Bearer)\s+[^\s"',;]+/gi, "$1$2 [redacted]"],
+  // Flags, including a quoted value with spaces in it (--password="two words").
+  [/(--(?:password|hub-token)(?:=|\s+))(?:"[^"]*"|'[^']*'|\S+)/gi, "$1[redacted]"],
   [/\b((?:HARNESS_REMOTE|OMP_BRIDGE)_(?:PASSWORD|HUB_TOKEN)=)\S+/g, "$1[redacted]"],
+  // key=value / "key": "value" for anything that names itself a secret.
+  [new RegExp(`(\\b[A-Za-z0-9_.-]*${SECRET_WORD}[A-Za-z0-9_.-]*["']?\\s*[:=]\\s*["']?)[^\\s"',;&]+`, "gi"), "$1[redacted]"],
+  // Credentials embedded in a URL: scheme://user:password@host
+  [/(\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:)[^\s/@]+@/gi, "$1[redacted]@"],
   [/\bhr[em]_[A-Za-z0-9_-]{20,}/g, "[redacted-hub-token]"],
   [/\bsk-[A-Za-z0-9_-]{20,}/g, "[redacted-api-key]"],
   [/\bgh[pousr]_[A-Za-z0-9]{30,}/g, "[redacted-github-token]"],
-  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "[redacted-slack-token]"]
+  [/\bxox[abprs]-[A-Za-z0-9-]{10,}/g, "[redacted-slack-token]"],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "[redacted-aws-key]"],
+  [/\bAIza[0-9A-Za-z_-]{35}\b/g, "[redacted-google-key]"],
+  [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "[redacted-jwt]"]
 ]
 
 /** `secrets` are literal values (this gateway's password, the hub tokens) that must never be shipped verbatim. */
@@ -56,12 +72,25 @@ export class LogTee {
     return this.queue.length
   }
 
-  /** Test seam and the single entry point for text: splits into lines and queues them. */
+  /**
+   * Test seam and the single entry point for text: splits into lines and queues them. Only the NEW text
+   * is scanned for newlines; re-splitting everything held so far on each write made a stream that never
+   * printed a newline (a progress bar redrawing with `\r`) cost quadratic time and unbounded memory.
+   */
   ingest(stream, text) {
-    const combined = (this.pending.get(stream) ?? "") + text
-    const parts = combined.split(/\r?\n/)
-    this.pending.set(stream, parts.pop() ?? "")
-    for (const line of parts) this.#enqueue(stream, line)
+    const parts = text.split(/\r?\n/)
+    let pending = (this.pending.get(stream) ?? "") + parts[0]
+    if (parts.length > 1) {
+      this.#enqueue(stream, pending)
+      for (let index = 1; index < parts.length - 1; index += 1) this.#enqueue(stream, parts[index])
+      pending = parts[parts.length - 1]
+    }
+    // Output that never ends a line is cut into bounded lines rather than accumulated.
+    while (pending.length > MAX_LINE_CHARS) {
+      this.#enqueue(stream, pending.slice(0, MAX_LINE_CHARS))
+      pending = pending.slice(MAX_LINE_CHARS)
+    }
+    this.pending.set(stream, pending)
     this.#schedulePartialFlush(stream)
   }
 
@@ -82,7 +111,9 @@ export class LogTee {
 
   #enqueue(stream, raw) {
     if (!this.enabled) return
-    const line = this.redact(raw.replace(ANSI, "")).trimEnd()
+    const clipped = raw.length > REDACT_SCAN_CHARS ? raw.slice(0, REDACT_SCAN_CHARS) : raw
+    let line = this.redact(clipped.replace(ANSI, "")).trimEnd()
+    if (line.length > MAX_LINE_CHARS) line = `${line.slice(0, MAX_LINE_CHARS)} …[truncated]`
     if (!line.trim()) return
     if (this.queue.length >= this.maxLines) {
       this.queue.shift()
@@ -95,6 +126,21 @@ export class LogTee {
   /** Removes and returns up to `max` of the oldest entries. */
   take(max) {
     return this.queue.splice(0, max)
+  }
+
+  /**
+   * Like `take`, but also bounded by an approximate size in bytes so a batch of long lines cannot exceed
+   * what the hub accepts in one request. Always returns at least one entry when any is queued.
+   */
+  takeWithin(maxEntries, maxBytes) {
+    let bytes = 0
+    let count = 0
+    while (count < this.queue.length && count < maxEntries) {
+      bytes += this.queue[count].line.length + 96
+      if (count > 0 && bytes > maxBytes) break
+      count += 1
+    }
+    return this.queue.splice(0, count)
   }
 
   /**

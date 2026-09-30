@@ -4,6 +4,8 @@
  * bounded, plain values before it reaches SQL, Loki labels, or the admin UI.
  */
 
+import { ACTIVITIES, resolveActivity } from "./activity.js"
+
 export class ValidationError extends Error {
   constructor(message) {
     super(message)
@@ -43,8 +45,9 @@ export function machineId(value) {
  * before the prober's identity check would have rejected it.
  */
 export function isForbiddenEndpointHost(hostname) {
-  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase()
-  if (host === "metadata.google.internal" || host === "metadata") return true
+  // `metadata.google.internal.` (a trailing dot is the same name) must not slip past an exact match.
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase().replace(/\.+$/, "")
+  if (FORBIDDEN_NAMES.has(host)) return true
   // The URL parser has already canonicalised decimal/hex/octal IPv4 spellings to dotted quads.
   if (/^169\.254\./.test(host)) return true
   if (!host.includes(":")) return false
@@ -52,11 +55,28 @@ export function isForbiddenEndpointHost(hostname) {
   const groups = ipv6Groups(host)
   if (!groups) return true // an IPv6 literal we cannot read is not one we should connect to
   if ((groups[0] & 0xffc0) === 0xfe80) return true
+  // AWS's IPv6 instance-metadata endpoint, fd00:ec2::254 (the whole fd00:ec2::/32 is AWS's).
+  if (groups[0] === 0xfd00 && groups[1] === 0x0ec2) return true
   // IPv4 smuggled inside IPv6: ::ffff:a.b.c.d (mapped, which URL prints as ::ffff:a9fe:a9fe), the
-  // deprecated ::a.b.c.d form, and NAT64's 64:ff9b::a.b.c.d.
+  // deprecated ::a.b.c.d form, NAT64's 64:ff9b::a.b.c.d and its local-use 64:ff9b:1::/48 (both carry the
+  // IPv4 address in the last 32 bits), and 6to4's 2002:a.b.c.d::/16 (the address follows the prefix).
   const embedsIPv4 = groups.slice(0, 5).every((group) => group === 0) && (groups[5] === 0xffff || groups[5] === 0)
-  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b && groups.slice(2, 6).every((group) => group === 0)
-  return (embedsIPv4 || nat64) && groups[6] >> 8 === 169 && (groups[6] & 0xff) === 254
+  const nat64 = groups[0] === 0x64 && groups[1] === 0xff9b && (groups.slice(2, 6).every((group) => group === 0) || groups[2] === 1)
+  if ((embedsIPv4 || nat64) && isLinkLocalV4(groups[6], groups[7])) return true
+  if (groups[0] === 0x2002 && isLinkLocalV4(groups[1], groups[2])) return true
+  return false
+}
+
+const FORBIDDEN_NAMES = new Set([
+  "metadata",
+  "metadata.google.internal",
+  "metadata.goog",
+  "instance-data",
+  "instance-data.ec2.internal"
+])
+
+function isLinkLocalV4(high, low) {
+  return high >> 8 === 169 && (high & 0xff) === 254 && Number.isInteger(low)
 }
 
 /** Expands an IPv6 literal into its eight 16-bit groups, or null if it is malformed. */
@@ -162,6 +182,8 @@ function timestamp(value) {
   return date.toISOString()
 }
 
+const SESSION_KINDS = new Set(["session", "background"])
+
 export function sessionList(value) {
   if (!Array.isArray(value)) return []
   const perAgent = new Map()
@@ -173,18 +195,86 @@ export function sessionList(value) {
     const count = perAgent.get(agentId) ?? 0
     if (count >= MAX_SESSIONS_PER_AGENT) continue
     perAgent.set(agentId, count + 1)
+    const status = text(session.status, 32) || "unknown"
     sessions.push({
       agent_id: agentId,
       session_id: id,
       title: text(session.title, 300),
       directory: text(session.directory, 1_024),
-      status: text(session.status, 32) || "unknown",
-      created_at: timestamp(session.createdAt),
-      updated_at: timestamp(session.updatedAt)
+      status,
+      kind: SESSION_KINDS.has(session.kind) ? session.kind : "session",
+      activity: resolveActivity(session.activity, status),
+      detail: text(session.detail, 300),
+      // `createdAt` / `updatedAt` are what machines reported before these two fields existed.
+      created_at: timestamp(session.startedAt ?? session.createdAt),
+      updated_at: timestamp(session.lastRanAt ?? session.updatedAt)
     })
     if (sessions.length >= MAX_SESSIONS) break
   }
   return sessions
+}
+
+const RELATIVE_WHEN = /^(\d{1,4})\s*(m|h|d|w)$/i
+const RELATIVE_UNIT_MS = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 }
+
+/**
+ * A point in time from a search box: an ISO date or date-time (`2026-09-29`, `2026-09-29T14:00Z`), or an age
+ * (`90m`, `24h`, `7d`, `2w`) meaning "that long ago". Anything else is a 400, not a silently ignored filter.
+ */
+export function parseWhen(value, now = Date.now()) {
+  const raw = String(value ?? "").trim()
+  if (!raw) return null
+  const relative = RELATIVE_WHEN.exec(raw)
+  if (relative) return new Date(now - Number(relative[1]) * RELATIVE_UNIT_MS[relative[2].toLowerCase()])
+  // Bare digits would be read as a year or a timestamp by Date.parse; require a date shape.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(raw)) throw new ValidationError(`"${raw.slice(0, 40)}" is not a date (use 2026-09-29, an ISO time, or an age like 24h or 7d)`)
+  const parsed = new Date(raw)
+  if (!Number.isFinite(parsed.getTime())) throw new ValidationError(`"${raw.slice(0, 40)}" is not a valid date`)
+  return parsed
+}
+
+const SORTS = new Set(["last_ran", "started"])
+
+/** The Session search the console and the API share, validated once. */
+export function sessionQuery(params, now = Date.now()) {
+  const get = (name) => (params.get(name) || "").trim()
+  const list = (name, allowed) => {
+    const items = get(name).split(",").map((item) => item.trim()).filter(Boolean)
+    for (const item of items) if (!allowed(item)) throw new ValidationError(`${name} has an unknown value: ${item.slice(0, 40)}`)
+    return items.length ? items : undefined
+  }
+  const query = {
+    machineId: get("machine") || undefined,
+    agentId: get("agent") || undefined,
+    kind: get("kind") || undefined,
+    activities: list("activity", (item) => item === "active" || ACTIVITIES.includes(item)),
+    status: get("status") || undefined,
+    query: get("q").slice(0, 200) || undefined,
+    startedAfter: parseWhen(get("startedAfter"), now),
+    startedBefore: parseWhen(get("startedBefore"), now),
+    ranAfter: parseWhen(get("ranAfter"), now),
+    ranBefore: parseWhen(get("ranBefore"), now),
+    sort: SORTS.has(get("sort")) ? get("sort") : "last_ran",
+    limit: Math.min(Math.max(Number(get("limit")) || 100, 1), 500),
+    offset: Math.min(Math.max(Number(get("offset")) || 0, 0), 10_000)
+  }
+  if (query.kind && !SESSION_KINDS.has(query.kind)) throw new ValidationError(`kind must be one of ${[...SESSION_KINDS].join(", ")}`)
+  return query
+}
+
+/**
+ * Agents whose Session list this heartbeat carries IN FULL. Only for those may the hub conclude that a
+ * Session missing from the list is gone; an agent that was asleep (not listed at all) or whose list was
+ * cut short must not have its Sessions marked gone.
+ */
+export function sessionAgentList(value) {
+  if (!Array.isArray(value)) return []
+  const ids = new Set()
+  for (const candidate of value.slice(0, MAX_AGENTS)) {
+    const id = text(candidate, 64)
+    if (id) ids.add(id)
+  }
+  return [...ids]
 }
 
 export function credentialsObject(value) {

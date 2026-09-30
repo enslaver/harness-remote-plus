@@ -1,5 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { listMachineProjects, type MachineProject } from "../machineClient"
+import {
+  GROUP_BY_OPTIONS,
+  RECENT_WINDOWS,
+  activityFromBucket,
+  groupItems,
+  loadGroupBy,
+  loadRecentWindow,
+  ranWithin,
+  saveGroupBy,
+  saveRecentWindow,
+  type AgentActivity,
+  type GroupBy,
+  type RecentWindow
+} from "../agent-activity"
+import { activityLabels } from "../agent-activity-labels"
+import {
+  backgroundAgentBySession,
+  backgroundSessionStatus,
+  claudeAgentHost,
+  listBackgroundAgents,
+  syntheticBackgroundRecords,
+  type BackgroundAgent
+} from "../background-agents"
 import { canCreateNativeSession, createNativeSessionTarget } from "../native-session-create"
 import {
   discoverAgentNativeSessionPage,
@@ -22,9 +45,10 @@ import { nativeSessionDisplayTitle } from "../native-session-title"
 import { useLanguage, useTranslator } from "../useTranslator"
 import type { Translator } from "../i18n"
 import type { WorkspaceMachine } from "../workspaceMachines"
-import { AgentIcon, ChatIcon, ChevronDownIcon, FolderIcon, LoadingIcon, PlusIcon, SearchIcon, ServerIcon } from "../Icons"
+import { AgentIcon, ChatIcon, ChevronDownIcon, FolderIcon, LoadingIcon, PlusIcon, RefreshIcon, SearchIcon, ServerIcon, TaskListIcon } from "../Icons"
 import "../native-session-home.css"
 import "../native-session-home-ux.css"
+import "../agent-activity.css"
 
 type Source = {
   machine: WorkspaceMachine
@@ -39,6 +63,8 @@ type RecordWithMachine = {
   machineID: string
   record: NativeSessionRecord
   project?: MachineProject
+  /** Set when this Session is also a Claude Code background agent (its live state is the agent's). */
+  background?: BackgroundAgent
 }
 
 type ProjectGroup = {
@@ -110,6 +136,9 @@ type Props = {
 }
 
 const SESSION_HOME_REFRESH_MS = 30_000
+// Background agents change state while nobody is looking at the Session, so they are polled faster than
+// the full index: one small CLI-backed read per Claude machine.
+const BACKGROUND_AGENT_REFRESH_MS = 10_000
 const COLLAPSED_PROJECT_SESSION_COUNT = 5
 type SessionFilter = "all" | FederatedSessionBucket
 
@@ -334,6 +363,71 @@ function catalogProject(record: NativeSessionRecord, projects: MachineProject[],
     .sort((left, right) => normalizedPath(right.path).value.length - normalizedPath(left.path).value.length)[0]
 }
 
+/**
+ * Lays Claude Code background agents over the Sessions the harness listed: an agent's own state (the CLI's
+ * registry) wins over the listing's last-message status, and an agent whose conversation the listing does not
+ * contain yet still gets a row that opens as a Claude Session. Pure: the base records are never modified, so
+ * an agent that is removed simply stops appearing on the next read.
+ */
+function withBackgroundAgents(
+  records: RecordWithMachine[],
+  backgroundByMachine: Record<string, BackgroundAgent[]>,
+  sources: Source[],
+  projectsByMachine: Record<string, MachineProject[]>
+): RecordWithMachine[] {
+  if (!Object.values(backgroundByMachine).some((agents) => agents.length)) return records
+  const claudeByMachine = new Map<string, MachineAgentHost>()
+  for (const { machine, snapshot } of sources) {
+    const claude = snapshot ? claudeAgentHost(snapshot.agents) : undefined
+    if (claude) claudeByMachine.set(machine.id, claude)
+  }
+  const overlaid = records.map((item) => {
+    const claude = claudeByMachine.get(item.machine.id)
+    if (!claude || item.record.agentId !== claude.id) return item
+    const agent = backgroundAgentBySession(backgroundByMachine[item.machine.id] ?? []).get(item.record.session.id)
+    if (!agent) return item
+    const status = backgroundSessionStatus(agent)
+    return {
+      ...item,
+      background: agent,
+      record: { ...item.record, status, session: { ...item.record.session, status, time: { created: item.record.session.time?.created ?? agent.startedAt ?? 0, updated: Math.max(item.record.session.time?.updated ?? 0, agent.updatedAt ?? 0) } } }
+    }
+  })
+  const synthetic: RecordWithMachine[] = []
+  for (const { machine, snapshot } of sources) {
+    const claude = claudeByMachine.get(machine.id)
+    const agents = backgroundByMachine[machine.id]
+    if (!claude || !snapshot || !agents?.length) continue
+    const known = new Set(records.filter((item) => item.machine.id === machine.id && item.record.agentId === claude.id).map((item) => item.record.session.id))
+    const byId = backgroundAgentBySession(agents)
+    for (const record of syntheticBackgroundRecords(agents, known, claude, machine.config)) {
+      synthetic.push({
+        machine,
+        machineID: snapshot.machine.id,
+        record,
+        project: catalogProject(record, projectsByMachine[machine.id] ?? [], snapshot.machine.id),
+        background: byId.get(record.session.id)
+      })
+    }
+  }
+  return synthetic.length ? [...overlaid, ...synthetic] : overlaid
+}
+
+/** When it last ran; falls back to when it started. 0 when the harness gave neither. */
+function ranAtFor(item: RecordWithMachine): number {
+  return item.record.session.time?.updated || item.record.session.time?.created || 0
+}
+
+/** "Started … · Last ran …" for a row's time tooltip. */
+function runTimesTitle(item: RecordWithMachine, labels: ReturnType<typeof activityLabels>): string {
+  const started = item.record.session.time?.created
+  const ran = ranAtFor(item)
+  const parts: string[] = []
+  if (started) parts.push(`${labels.started} ${new Date(started).toLocaleString()}`)
+  parts.push(ran ? `${labels.lastRan} ${new Date(ran).toLocaleString()}` : labels.neverRan)
+  return parts.join(" · ")
+}
+
 function projectGroups(records: RecordWithMachine[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>()
   for (const item of records) {
@@ -414,8 +508,12 @@ export function NativeSessionHome({
 }: Props) {
   const t = useTranslator()
   const language = useLanguage()
-  const [records, setRecords] = useState<RecordWithMachine[]>([])
+  const labels = activityLabels(language)
+  const [baseRecords, setRecords] = useState<RecordWithMachine[]>([])
   const [projectsByMachine, setProjectsByMachine] = useState<Record<string, MachineProject[]>>({})
+  const [backgroundByMachine, setBackgroundByMachine] = useState<Record<string, BackgroundAgent[]>>({})
+  const [groupBy, setGroupBy] = useState<GroupBy>(loadGroupBy)
+  const [recentWindow, setRecentWindow] = useState<RecentWindow>(loadRecentWindow)
   const [loading, setLoading] = useState(false)
   const [loadedSignature, setLoadedSignature] = useState<string | null>(null)
   const [revision, setRevision] = useState(0)
@@ -466,6 +564,32 @@ export function NativeSessionHome({
     ].join(":")
   ).join("|")
   const loaded = discoveryReady && loadedSignature === machineSignature
+
+  // Claude Code background agents, read from every machine that has the Claude harness. Never throws (a
+  // machine without Claude Code just reports none), and only republishes when something actually changed.
+  useEffect(() => {
+    if (!discoveryReady) return
+    const targets = sources.filter(({ snapshot, state }) => state === "online" && snapshot && claudeAgentHost(snapshot.agents))
+    if (!targets.length) {
+      setBackgroundByMachine((current) => Object.keys(current).length ? {} : current)
+      return
+    }
+    let cancelled = false
+    const load = async () => {
+      const entries = await Promise.all(targets.map(async ({ machine }) => [machine.id, (await listBackgroundAgents(machine.config)).agents] as const))
+      if (cancelled) return
+      const next = Object.fromEntries(entries)
+      setBackgroundByMachine((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    }
+    void load()
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") void load() }, BACKGROUND_AGENT_REFRESH_MS)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [discoveryReady, machineSignature, revision])
+
+  const records = useMemo(
+    () => withBackgroundAgents(baseRecords, backgroundByMachine, sources, projectsByMachine),
+    [baseRecords, backgroundByMachine, projectsByMachine, sources]
+  )
 
   useEffect(() => {
     if (!loaded || loading || !deletingKeys?.size || !onDeletionSettled) return
@@ -778,9 +902,8 @@ export function NativeSessionHome({
       .map(recordKey)
   ), [projectionForItem, scopedRecords])
   const attentionCount = attentionKeys.size
-  const operationalFilter: FederatedOperationalBucket | "" =
-    filter === "failed" || filter === "completed" || filter === "recent" ? filter : ""
-  const showOperationalFilter = bucketCounts.failed + bucketCounts.completed + bucketCounts.recent > 0 || Boolean(operationalFilter)
+  const operationalFilter: FederatedOperationalBucket | "" = filter === "recent" ? filter : ""
+  const showOperationalFilter = bucketCounts.recent > 0 || Boolean(operationalFilter)
 
   useEffect(() => {
     onAttentionCountChange?.(attentionCount)
@@ -799,16 +922,17 @@ export function NativeSessionHome({
       if (projectFilter && projection.projectKey !== projectFilter) return false
       if (modelFilter && projection.modelKey !== modelFilter) return false
       if (filter !== "all" && projection.bucket !== filter) return false
+      if (!ranWithin(ranAtFor(item), recentWindow)) return false
       return matchesFederatedSessionQuery(projection, query)
     })
     return sessions.length ? [{ ...group, sessions }] : []
-  }), [agentFilter, filter, groups, machineFilter, modelFilter, projectFilter, projectionForItem, query])
+  }), [agentFilter, filter, groups, machineFilter, modelFilter, projectFilter, projectionForItem, query, recentWindow])
 
   const machineGroups = useMemo(() => sources
     .filter(({ machine }) => !machineFilter || machine.id === machineFilter)
     .flatMap(({ machine, snapshot, state, error }) => {
       const projects = filteredGroups.filter((group) => group.machine.id === machine.id)
-      const filtering = Boolean(query.trim() || agentFilter || projectFilter || modelFilter || filter !== "all")
+      const filtering = Boolean(query.trim() || agentFilter || projectFilter || modelFilter || filter !== "all" || recentWindow !== "any")
       if (!projects.length && filtering) return []
       return [{
         machine,
@@ -823,7 +947,38 @@ export function NativeSessionHome({
           count + group.sessions.filter((item) => projectionForItem(item).bucket === "attention").length, 0),
         updatedAt: projects.reduce((latest, group) => Math.max(latest, group.updatedAt), 0)
       }]
-    }), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, sources])
+    }), [agentFilter, filter, filteredGroups, machineFilter, modelFilter, projectFilter, projectionForItem, query, recentWindow, sources])
+
+  // Every match across every machine and project, regrouped for the flat views (recent feed, by status,
+  // project, machine or agent). The Machine › Project tree above is untouched and stays the default.
+  const flatGroups = useMemo(() => {
+    if (groupBy === "machine-project") return []
+    const entries = filteredGroups.flatMap((group) => group.sessions).map((item) => {
+      const projection = projectionForItem(item)
+      return {
+        item,
+        machineID: item.machine.id,
+        machineLabel: item.machine.name,
+        agentID: item.record.agentId,
+        agentLabel: item.record.agentLabel,
+        projectKey: projection.projectKey,
+        projectLabel: projection.projectLabel,
+        activity: activityFromBucket(projection.bucket, item.record.status),
+        ranAt: ranAtFor(item)
+      }
+    })
+    return groupItems(entries, groupBy)
+  }, [filteredGroups, groupBy, projectionForItem])
+
+  function chooseGroupBy(value: GroupBy) {
+    setGroupBy(value)
+    saveGroupBy(value)
+  }
+
+  function chooseRecentWindow(value: RecentWindow) {
+    setRecentWindow(value)
+    saveRecentWindow(value)
+  }
 
   const olderPageTargets = [...pageCache.current.entries()].filter(([, entry]) =>
     entry.nextCursor
@@ -1013,6 +1168,89 @@ export function NativeSessionHome({
     }
   }
 
+  /** One Session row. Used by every grouping so a Session looks and behaves the same wherever it is listed. */
+  function renderSessionRow(
+    item: RecordWithMachine,
+    { depth, projectName, machineName, showContext }: { depth: number; projectName: string; machineName: string; showContext: boolean }
+  ) {
+    const status = presentationForItem(item)
+    const projection = projectionForItem(item)
+    const operationalLabel = projection.bucket === "failed" || projection.bucket === "completed"
+      ? federatedOperationalStateLabel(projection.bucket, language)
+      : status.label
+    const title = nativeSessionDisplayTitle(
+      item.record.session.title,
+      t("sf.untitledSession", { agent: item.record.agentLabel })
+    )
+    const normalizedTitle = title
+    const accessibleTitle = normalizedTitle.length > 140 ? `${normalizedTitle.slice(0, 137)}…` : normalizedTitle
+    const tooltipTitle = normalizedTitle.length > 240 ? `${normalizedTitle.slice(0, 237)}…` : normalizedTitle
+    const timestamp = item.record.session.time?.updated || item.record.session.time?.created || 0
+    const summary = item.record.session.summary
+    const hasChanges = Boolean(summary && (summary.files || summary.additions || summary.deletions))
+    const nativeAgent = item.record.session.agent?.trim()
+    const restrictionCount = item.record.session.permission?.filter((rule) => rule.action === "deny").length || 0
+    const icon = harnessIconUrl(item.record.backend)
+    const targetKey = recordKey(item)
+    const selected = targetKey === selectedKey
+    const recentlyCompleted = targetKey === recentlyCompletedKey
+    const deleting = Boolean(deletingKeys?.has(targetKey))
+    return (
+      <button
+        type="button"
+        ref={selected ? selectedRowRef : undefined}
+        className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
+        data-depth={Math.min(depth, 3)}
+        key={targetKey}
+        onClick={() => { if (!deleting) open(item) }}
+        disabled={deleting}
+        aria-busy={deleting || undefined}
+        aria-current={selected ? "page" : undefined}
+        aria-label={t("sf.openSessionAria", {
+          title: accessibleTitle,
+          agent: `${item.record.agentLabel}${nativeAgent ? ` · ${nativeAgent}` : ""}${restrictionCount ? ` · ${t("sf.restrictionsLabel", { count: restrictionCount })}` : ""}${depth ? ` · ${t("sf.childSession")}` : ""}`,
+          status: deleting ? t("sf.deleting") : operationalLabel,
+          project: projectName,
+          machine: machineName
+        })}
+        title={tooltipTitle}
+      >
+        <span className="hr-native-session-harness" aria-hidden="true">
+          {icon ? <img src={icon} alt="" /> : <b>{item.record.agentLabel.slice(0, 2).toUpperCase()}</b>}
+          <i data-state={status.state} />
+        </span>
+        <span className="hr-native-session-copy">
+          <strong>{title}</strong>
+          <small>
+            <span>{item.record.agentLabel}{nativeAgent ? ` · ${nativeAgent}` : ""}{item.record.session.external === true ? ` · ${t("sf.external")}` : ""}</span>
+                        {showContext ? <span className="hr-native-session-context">{machineName} · {projectName}</span> : null}
+                        {item.background ? <span className="hr-native-session-bg" title={labels.backgroundTitle}>{labels.background}{item.background.subagents?.total ? ` · ${item.background.subagents.running}/${item.background.subagents.total}` : ""}</span> : null}
+                        {item.background && (item.background.needs || item.background.detail) ? <span className="hr-native-session-detail">{item.background.needs || item.background.detail}</span> : null}
+            {restrictionCount ? <span className="hr-native-session-policy">{t("sf.restrictedCount", { count: restrictionCount })}</span> : null}
+            {depth ? <span className="hr-native-session-child-label">{t("sf.childSession")}</span> : null}
+            {hasChanges ? (
+              <span className="hr-native-session-changes">
+                <b>+{summary?.additions || 0}</b>
+                <i>−{summary?.deletions || 0}</i>
+                <em>{summary?.files || 0} file{summary?.files === 1 ? "" : "s"}</em>
+              </span>
+            ) : null}
+          </small>
+        </span>
+        <span className="hr-native-session-meta">
+          <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
+            {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted ? "✓ " : ""}{operationalLabel}</>}
+          </span>
+          {deleting ? null : (
+            <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? runTimesTitle(item, labels) : undefined}>
+              {relativeTime(timestamp)}
+            </time>
+          )}
+        </span>
+      </button>
+    )
+  }
+
   return (
     <section className="hr-native-home" aria-label="Sessions" aria-busy={!loaded || undefined}>
       <div className="hr-native-home-heading">
@@ -1057,6 +1295,28 @@ export function NativeSessionHome({
             <button type="button" className={filter === "attention" ? "active" : ""} onClick={() => setFilter("attention")} aria-pressed={filter === "attention"}>
               <span>{t("sf.filterAttention")}</span> <b>{attentionCount}</b>
             </button>
+            <button type="button" className={filter === "completed" ? "active" : ""} onClick={() => setFilter("completed")} aria-pressed={filter === "completed"}>
+              <span>{labels.activity.completed}</span> <b>{bucketCounts.completed}</b>
+            </button>
+            <button type="button" className={filter === "failed" ? "active" : ""} onClick={() => setFilter("failed")} aria-pressed={filter === "failed"}>
+              <span>{labels.activity.failed}</span> <b>{bucketCounts.failed}</b>
+            </button>
+          </div>
+          <div className="hr-native-session-scopes hr-native-session-view">
+            <label className="hr-native-scope" title={labels.groupBy}>
+              <TaskListIcon size={13} />
+              <select value={groupBy} onChange={(event) => chooseGroupBy(event.target.value as GroupBy)} aria-label={labels.groupBy}>
+                {GROUP_BY_OPTIONS.map((option) => <option value={option} key={option}>{labels.group[option]}</option>)}
+              </select>
+              <ChevronDownIcon size={12} />
+            </label>
+            <label className="hr-native-scope" title={labels.window}>
+              <RefreshIcon size={13} />
+              <select value={recentWindow} onChange={(event) => chooseRecentWindow(event.target.value as RecentWindow)} aria-label={labels.window}>
+                {RECENT_WINDOWS.map((option) => <option value={option} key={option}>{labels.windows[option]}</option>)}
+              </select>
+              <ChevronDownIcon size={12} />
+            </label>
           </div>
           <div className="hr-native-session-scopes">
             {sources.length > 1 ? (
@@ -1109,8 +1369,6 @@ export function NativeSessionHome({
                     aria-label={federatedMoreStatesLabel(language)}
                   >
                     <option value="" disabled>{federatedMoreStatesLabel(language)}</option>
-                    <option value="failed">{federatedOperationalStateLabel("failed", language)} · {bucketCounts.failed}</option>
-                    <option value="completed">{federatedOperationalStateLabel("completed", language)} · {bucketCounts.completed}</option>
                     <option value="recent">{federatedOperationalStateLabel("recent", language)} · {bucketCounts.recent}</option>
                   </select>
                   <ChevronDownIcon size={12} />
@@ -1186,8 +1444,49 @@ export function NativeSessionHome({
         </div>
       ) : null}
 
-      <div className="hr-native-machine-list">
-        {machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => {
+      <div className="hr-native-machine-list" data-group-by={groupBy}>
+        {groupBy !== "machine-project" ? (
+          <>
+            {flatGroups.map((group) => {
+              const groupId = `${groupBy}:${group.key}`
+              const collapsed = collapsedProjects.has(groupId)
+              const title = groupBy === "status"
+                ? labels.activity[group.activity as AgentActivity]
+                : groupBy === "none" ? labels.recentFeed : group.label
+              return (
+                <section className={`hr-native-project-group hr-native-flat-group${collapsed ? " collapsed" : ""}`} data-activity={group.activity} key={groupId} aria-label={t("sf.groupSessions", { name: title })}>
+                  <button
+                    type="button"
+                    className="hr-native-project-heading"
+                    onClick={() => toggleProjectCollapsed(groupId)}
+                    aria-expanded={!collapsed}
+                    aria-label={t(collapsed ? "sf.expandGroup" : "sf.collapseGroup", { name: title })}
+                  >
+                    <span><strong>{title}</strong></span>
+                    <span><b>{group.items.length}</b><i className="hr-native-project-chevron" aria-hidden="true"><ChevronDownIcon size={13} /></i></span>
+                  </button>
+                  {collapsed ? null : (
+                    <div className="hr-native-home-list">
+                      {group.items.map(({ item, projectLabel }) => renderSessionRow(item, {
+                        depth: 0,
+                        projectName: projectLabel,
+                        machineName: item.machine.name,
+                        // A group by machine already says which machine; likewise for project. Only say what the heading does not.
+                        showContext: groupBy !== "machine" || sources.length > 1
+                      }))}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+            {sources.filter(({ state }) => state === "offline").map(({ machine, error }) => (
+              <div className="hr-native-machine-empty" key={machine.id}>
+                <ServerIcon size={15} />
+                <span>{machine.name}: {error || t("sf.machineOffline")}</span>
+              </div>
+            ))}
+          </>
+        ) : machineGroups.map(({ machine, label, state, error, projects, sessionCount, workingCount, attentionCount: machineAttentionCount }) => {
           const machineCollapsed = collapsedMachines.has(machine.id)
           const reconnecting = state === "online" && Boolean(error)
           return (
@@ -1246,81 +1545,7 @@ export function NativeSessionHome({
                         {!collapsed ? (
                           <>
                             <div className="hr-native-home-list">
-                              {visibleRows.map(({ item, depth }) => {
-                                const status = presentationForItem(item)
-                                const projection = projectionForItem(item)
-                                const operationalLabel = projection.bucket === "failed" || projection.bucket === "completed"
-                                  ? federatedOperationalStateLabel(projection.bucket, language)
-                                  : status.label
-                                const title = nativeSessionDisplayTitle(
-                                  item.record.session.title,
-                                  t("sf.untitledSession", { agent: item.record.agentLabel })
-                                )
-                                const normalizedTitle = title
-                                const accessibleTitle = normalizedTitle.length > 140 ? `${normalizedTitle.slice(0, 137)}…` : normalizedTitle
-                                const tooltipTitle = normalizedTitle.length > 240 ? `${normalizedTitle.slice(0, 237)}…` : normalizedTitle
-                                const timestamp = item.record.session.time?.updated || item.record.session.time?.created || 0
-                                const summary = item.record.session.summary
-                                const hasChanges = Boolean(summary && (summary.files || summary.additions || summary.deletions))
-                                const nativeAgent = item.record.session.agent?.trim()
-                                const restrictionCount = item.record.session.permission?.filter((rule) => rule.action === "deny").length || 0
-                                const icon = harnessIconUrl(item.record.backend)
-                                const targetKey = recordKey(item)
-                                const selected = targetKey === selectedKey
-                                const recentlyCompleted = targetKey === recentlyCompletedKey
-                                const deleting = Boolean(deletingKeys?.has(targetKey))
-                                return (
-                                  <button
-                                    type="button"
-                                    ref={selected ? selectedRowRef : undefined}
-                                    className={`hr-native-session-row ${status.state}${selected ? " selected" : ""}${recentlyCompleted ? " just-finished" : ""}${deleting ? " deleting" : ""}${depth ? " child" : ""}`}
-                                    data-depth={Math.min(depth, 3)}
-                                    key={targetKey}
-                                    onClick={() => { if (!deleting) open(item) }}
-                                    disabled={deleting}
-                                    aria-busy={deleting || undefined}
-                                    aria-current={selected ? "page" : undefined}
-                                    aria-label={t("sf.openSessionAria", {
-                                      title: accessibleTitle,
-                                      agent: `${item.record.agentLabel}${nativeAgent ? ` · ${nativeAgent}` : ""}${restrictionCount ? ` · ${t("sf.restrictionsLabel", { count: restrictionCount })}` : ""}${depth ? ` · ${t("sf.childSession")}` : ""}`,
-                                      status: deleting ? t("sf.deleting") : operationalLabel,
-                                      project: group.name,
-                                      machine: group.machine.name
-                                    })}
-                                    title={tooltipTitle}
-                                  >
-                                    <span className="hr-native-session-harness" aria-hidden="true">
-                                      {icon ? <img src={icon} alt="" /> : <b>{item.record.agentLabel.slice(0, 2).toUpperCase()}</b>}
-                                      <i data-state={status.state} />
-                                    </span>
-                                    <span className="hr-native-session-copy">
-                                      <strong>{title}</strong>
-                                      <small>
-                                        <span>{item.record.agentLabel}{nativeAgent ? ` · ${nativeAgent}` : ""}{item.record.session.external === true ? ` · ${t("sf.external")}` : ""}</span>
-                                        {restrictionCount ? <span className="hr-native-session-policy">{t("sf.restrictedCount", { count: restrictionCount })}</span> : null}
-                                        {depth ? <span className="hr-native-session-child-label">{t("sf.childSession")}</span> : null}
-                                        {hasChanges ? (
-                                          <span className="hr-native-session-changes">
-                                            <b>+{summary?.additions || 0}</b>
-                                            <i>−{summary?.deletions || 0}</i>
-                                            <em>{summary?.files || 0} file{summary?.files === 1 ? "" : "s"}</em>
-                                          </span>
-                                        ) : null}
-                                      </small>
-                                    </span>
-                                    <span className="hr-native-session-meta">
-                                      <span className="hr-native-session-status" data-state={deleting ? "deleting" : status.state} aria-live={selected || deleting ? "polite" : undefined}>
-                                        {deleting ? <><LoadingIcon size={12} /> {t("sf.deleting")}</> : <>{recentlyCompleted ? "✓ " : ""}{operationalLabel}</>}
-                                      </span>
-                                      {deleting ? null : (
-                                        <time dateTime={timestamp ? new Date(timestamp).toISOString() : undefined} title={timestamp ? new Date(timestamp).toLocaleString() : undefined}>
-                                          {relativeTime(timestamp)}
-                                        </time>
-                                      )}
-                                    </span>
-                                  </button>
-                                )
-                              })}
+                              {visibleRows.map(({ item, depth }) => renderSessionRow(item, { depth, projectName: group.name, machineName: group.machine.name, showContext: false }))}
                             </div>
                             {hiddenCount > 0 ? (
                               <button
@@ -1354,7 +1579,7 @@ export function NativeSessionHome({
       ) : null}
 
       {loaded && records.length > 0 && filteredGroups.length === 0 ? (
-        <div className="hr-native-home-empty compact"><SearchIcon size={18} /><span>{t("sf.noMatch")}</span></div>
+        <div className="hr-native-home-empty compact"><SearchIcon size={18} /><span>{recentWindow !== "any" && !query.trim() && filter === "all" ? labels.noMatchInWindow : t("sf.noMatch")}</span></div>
       ) : null}
 
       {loaded && !loading && !discoveryError && records.length === 0 && sources.length === 0 ? (

@@ -1,7 +1,7 @@
 import test from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { ago, clip, installCommands, parseRoute, powershellQuote, proxyState, safeNext, sessionTone, shellQuote } from "../public/util.js"
+import { ACTIVITY_LABELS, ACTIVITY_ORDER, activityLabel, activityTone, ago, clip, groupSessions, installCommands, parseRoute, powershellQuote, proxyState, safeNext, sessionSearchParams, sessionTone, shellQuote } from "../public/util.js"
 
 test("ago reads naturally at each scale and tolerates bad input", () => {
   const now = Date.parse("2026-06-01T12:00:00Z")
@@ -96,4 +96,62 @@ test("safeNext only ever returns a same-origin path (no open redirect after sign
   assert.equal(safeNext(""), null)
   assert.equal(safeNext("?other=1"), null)
   assert.equal(safeNext(undefined), null)
+})
+
+const session = (over) => ({ machineId: "m1", machineName: "Studio", agentId: "claude", id: "s", directory: "/work/repo", activity: "idle", startedAt: "2026-09-29T08:00:00Z", lastRanAt: "2026-09-29T09:00:00Z", ...over })
+
+test("every activity has a label and a colour the stylesheet defines", () => {
+  const known = ["ok", "warn", "bad", "busy", "attention", "off", "pending", "idle", "unknown"]
+  for (const activity of ACTIVITY_ORDER) {
+    assert.ok(ACTIVITY_LABELS[activity], activity)
+    assert.ok(known.includes(activityTone(activity)), `${activity} -> ${activityTone(activity)}`)
+  }
+  assert.equal(activityLabel("needs_input"), "Needs you")
+  assert.equal(activityLabel("nonsense"), "Unknown")
+  assert.equal(activityTone("completed"), "ok")
+  assert.equal(activityTone("failed"), "bad")
+  assert.equal(activityTone("working"), "busy")
+})
+
+test("no grouping is one recent feed, newest run first, undated last", () => {
+  const groups = groupSessions([
+    session({ id: "old", lastRanAt: "2026-09-29T01:00:00Z" }),
+    session({ id: "new", lastRanAt: "2026-09-29T11:00:00Z" }),
+    session({ id: "undated", lastRanAt: null, startedAt: null })
+  ], "none")
+  assert.equal(groups.length, 1)
+  assert.deepEqual(groups[0].sessions.map((entry) => entry.id), ["new", "old", "undated"])
+  assert.deepEqual(groupSessions([], "none"), [])
+})
+
+test("grouping by status puts what needs a look first", () => {
+  const groups = groupSessions(["completed", "working", "failed", "needs_input", "stopped", "idle", "gone"].map((activity) => session({ id: activity, activity })), "status")
+  assert.deepEqual(groups.map((group) => group.key), ["needs_input", "working", "failed", "completed", "stopped", "idle", "gone"])
+  assert.equal(groups[0].label, "Needs you")
+})
+
+test("grouping by machine, agent or project orders groups by their newest run and never mixes machines' same-named folders", () => {
+  const items = [
+    session({ id: "a", machineId: "m1", machineName: "Studio", lastRanAt: "2026-09-29T05:00:00Z" }),
+    session({ id: "b", machineId: "m2", machineName: "Laptop", lastRanAt: "2026-09-29T10:00:00Z" }),
+    session({ id: "c", machineId: "m1", machineName: "Studio", lastRanAt: "2026-09-29T06:00:00Z" })
+  ]
+  assert.deepEqual(groupSessions(items, "machine").map((group) => [group.label, group.sessions.length]), [["Laptop", 1], ["Studio", 2]])
+  assert.deepEqual(groupSessions(items, "project").map((group) => group.label), ["repo", "repo"], "the same folder name on two machines is two groups")
+  assert.equal(groupSessions(items, "project").length, 2)
+  assert.deepEqual(groupSessions([session({ agentId: "codex" }), session({ agentId: "claude", lastRanAt: "2026-09-29T12:00:00Z" })], "agent").map((group) => group.label), ["claude", "codex"])
+  assert.equal(groupSessions([session({ directory: "" })], "project")[0].label, "No folder")
+  assert.equal(groupSessions([session({ directory: "C:\\work\\app" })], "project")[0].label, "app", "Windows paths too")
+})
+
+test("a group key that looks like an Object prototype property is still just a key", () => {
+  const groups = groupSessions([session({ agentId: "__proto__" }), session({ agentId: "constructor" }), session({ agentId: "toString" })], "agent")
+  assert.equal(groups.length, 3)
+})
+
+test("the search query carries only what was chosen", () => {
+  assert.equal(sessionSearchParams({}).toString(), "limit=200")
+  const params = sessionSearchParams({ q: "  parser ", activity: "failed", machine: "m1", agent: "claude", kind: "background", ranWithin: "24h", startedWithin: "7d", sort: "started", limit: 50 })
+  assert.deepEqual(Object.fromEntries(params), { q: "parser", activity: "failed", machine: "m1", agent: "claude", kind: "background", ranAfter: "24h", startedAfter: "7d", sort: "started", limit: "50" })
+  assert.equal(sessionSearchParams({ sort: "last_ran" }).has("sort"), false, "the default sort is not sent")
 })

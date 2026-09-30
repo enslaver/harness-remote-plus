@@ -56,6 +56,79 @@ export function sessionTone(status) {
   return "unknown"
 }
 
+// ---- what a Session is doing ---------------------------------------------------------------------------------
+// The hub stores one vocabulary for every harness (see src/activity.js); these are its names and colours.
+
+export const ACTIVITY_LABELS = {
+  working: "Working", needs_input: "Needs you", idle: "Idle", completed: "Completed", failed: "Failed", stopped: "Stopped", gone: "Gone", unknown: "Unknown"
+}
+/** The order groups appear in when grouped by status: what needs a look first. */
+export const ACTIVITY_ORDER = ["needs_input", "working", "failed", "completed", "stopped", "idle", "unknown", "gone"]
+const ACTIVITY_TONE = { working: "busy", needs_input: "attention", completed: "ok", failed: "bad", stopped: "idle", idle: "idle", gone: "off", unknown: "unknown" }
+
+export function activityLabel(activity) {
+  return ACTIVITY_LABELS[activity] || ACTIVITY_LABELS.unknown
+}
+
+export function activityTone(activity) {
+  return ACTIVITY_TONE[activity] || "unknown"
+}
+
+export const GROUP_BY_LABELS = { none: "No grouping", status: "Status", machine: "Machine", project: "Project", agent: "Agent" }
+
+function timeOf(value) {
+  const ms = value ? Date.parse(value) : NaN
+  return Number.isFinite(ms) ? ms : 0
+}
+
+function projectOf(session) {
+  const directory = String(session.directory || "")
+  const parts = directory.split(/[\\/]/).filter(Boolean)
+  return { key: session.machineId + ":" + directory, label: parts.length ? parts[parts.length - 1] : "No folder" }
+}
+
+/**
+ * Splits already-fetched Sessions into groups: a plain recent feed, or by status, machine, project (folder) or
+ * agent. Newest run first inside a group; groups ordered by their newest run (status groups by urgency).
+ */
+export function groupSessions(sessions, by) {
+  const ranAt = (session) => timeOf(session.lastRanAt) || timeOf(session.startedAt) || timeOf(session.updatedAt)
+  const sorted = sessions.slice().sort((a, b) => ranAt(b) - ranAt(a))
+  if (by === "none" || !by) return sorted.length ? [{ key: "recent", label: "Recent", sessions: sorted, ranAt: ranAt(sorted[0]) }] : []
+  const groups = []
+  const index = new Map()
+  for (const session of sorted) {
+    let key, label
+    if (by === "status") { key = session.activity || "unknown"; label = activityLabel(key) }
+    else if (by === "machine") { key = session.machineId; label = session.machineName || session.machineId }
+    else if (by === "agent") { key = session.agentId; label = session.agentId }
+    else { const project = projectOf(session); key = project.key; label = project.label }
+    if (!index.has(key)) { index.set(key, groups.length); groups.push({ key, label, activity: by === "status" ? key : undefined, sessions: [], ranAt: ranAt(session) }) }
+    groups[index.get(key)].sessions.push(session)
+  }
+  if (by === "status") return groups.sort((a, b) => ACTIVITY_ORDER.indexOf(a.key) - ACTIVITY_ORDER.indexOf(b.key))
+  return groups.sort((a, b) => b.ranAt - a.ranAt || String(a.label).localeCompare(String(b.label)))
+}
+
+export const RAN_WINDOWS = [["", "Any time"], ["1h", "Last hour"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"]]
+export const STARTED_WINDOWS = [["", "Any time"], ["24h", "Last 24 hours"], ["7d", "Last 7 days"], ["30d", "Last 30 days"]]
+
+/** The query the Sessions API takes, from the console's filter controls. Empty controls add nothing. */
+export function sessionSearchParams(filters) {
+  const params = new URLSearchParams()
+  const set = (name, value) => { if (value) params.set(name, value) }
+  set("q", String(filters.q || "").trim())
+  set("activity", filters.activity)
+  set("machine", filters.machine)
+  set("agent", filters.agent)
+  set("kind", filters.kind)
+  set("ranAfter", filters.ranWithin)
+  set("startedAfter", filters.startedWithin)
+  set("sort", filters.sort === "started" ? "started" : "")
+  params.set("limit", String(filters.limit || 200))
+  return params
+}
+
 export function proxyState(machine) {
   const proxy = machine.proxy
   if (!proxy.enabled || !proxy.hasCredentials) return { tone: "off", label: "Web UI off", detail: "This machine kept its credentials; it can be seen here but not opened through the hub." }

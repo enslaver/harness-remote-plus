@@ -34,7 +34,7 @@ async function main() {
   }
 
   const keys = deriveKeys(config.secretKey)
-  const pool = createPool({ databaseUrl: config.databaseUrl, schema: config.databaseSchema })
+  const pool = createPool({ databaseUrl: config.databaseUrl, schema: config.databaseSchema, log })
   await migrate(pool, resolved.migrationsDir, { log })
   const store = new Store(pool, new SecretBox(keys.secretbox))
 

@@ -42,6 +42,30 @@ const agents = [
   capabilities: { sessions: true, prompt: true, abort: true, streaming: true, models: true, filesystemBrowser: true, commands: true }
 }))
 const project = { id: "project-alpha", machineId: "machine_studio", name: "alpha", path: "/work/alpha", kind: "git", configured: true }
+
+// Sessions the harnesses list, and Claude Code background agents the CLI reports. cl2 is BOTH an ordinary Claude
+// Session and a finished background agent (the agent's state must win); bgfail and bgrun are agents the harness
+// listing does not contain, so the rail has to make rows for them.
+const T = Date.now()
+const uuid = (short) => `${short}-1111-2222-3333-444455556666`
+const sessionsByAgent = {
+  codex: [
+    { id: "cx1", title: "Fix the flaky checkout test", directory: "/work/alpha", time: { created: T - 3 * 3_600_000, updated: T - 30_000 }, status: { type: "busy" } },
+    { id: "cx2", title: "Add rate limiting to the API", directory: "/work/beta", time: { created: T - 9 * 3_600_000, updated: T - 2 * 3_600_000 }, status: { type: "idle" } },
+    { id: "cx3", title: "Migrate the build to ESM", directory: "/work/alpha", time: { created: T - 7 * 3_600_000, updated: T - 5 * 3_600_000 }, status: { type: "error" } }
+  ],
+  claude: [
+    { id: "cl1", title: "Write the migration guide", directory: "/work/beta", time: { created: T - 3 * 86_400_000, updated: T - 26 * 3_600_000 }, status: { type: "idle" } },
+    { id: uuid("aaaa0002"), title: "Refactor the parser", directory: "/work/alpha", time: { created: T - 3 * 86_400_000, updated: T - 3 * 86_400_000 + 600_000 }, status: { type: "idle" } }
+  ]
+}
+const finishedCaps = { open: true, prompt: true, logs: true, stop: false, resume: true, remove: true }
+const liveCaps = { open: true, prompt: false, logs: true, stop: true, resume: false, remove: false }
+const backgroundAgents = [
+  { key: "background:aaaa0002", kind: "background", id: "aaaa0002", sessionId: uuid("aaaa0002"), name: "Refactor the parser", directory: "/work/alpha", activity: "completed", rawState: "done", startedAt: T - 3 * 86_400_000, updatedAt: T - 3 * 86_400_000 + 600_000, capabilities: finishedCaps },
+  { key: "background:aaaa0003", kind: "background", id: "aaaa0003", sessionId: uuid("aaaa0003"), name: "Bump dependencies", directory: "/work/alpha", activity: "failed", rawState: "failed", detail: "Tests failed", startedAt: T - 5 * 3_600_000, updatedAt: T - 4 * 3_600_000, capabilities: finishedCaps },
+  { key: "background:aaaa0004", kind: "background", id: "aaaa0004", sessionId: uuid("aaaa0004"), name: "Fix the type errors", directory: "/work/alpha", activity: "working", rawState: "running", startedAt: T - 20 * 60_000, updatedAt: T - 120_000, capabilities: liveCaps }
+]
 const gatewayRequests = []
 const gateway = http.createServer((req, res) => {
   const url = new URL(req.url, "http://gateway.local")
@@ -55,6 +79,17 @@ const gateway = http.createServer((req, res) => {
   if (url.pathname === "/v1/work-threads") return json(200, { workThreads: [] })
   if (url.pathname === "/v1/session-links") return json(200, { links: [] })
   if (/\/global\/event$/.test(url.pathname)) { res.writeHead(200, { "Content-Type": "text/event-stream" }); res.write(": connected\n\n"); return }
+  const scopedSessions = /^\/v1\/agents\/([^/]+)\/experimental\/session$/.exec(url.pathname)
+  if (scopedSessions) return json(200, sessionsByAgent[scopedSessions[1]] ?? [])
+  if (url.pathname === "/v1/background-agents") return json(200, { available: true, agents: backgroundAgents })
+  const backgroundAction = /^\/v1\/background-agents\/([a-f0-9]{8})\/(stop|logs)$/.exec(url.pathname)
+  if (backgroundAction) {
+    const agent = backgroundAgents.find((candidate) => candidate.id === backgroundAction[1])
+    if (!agent) return json(404, { error: "unknown agent", code: "unknown_agent" })
+    if (backgroundAction[2] === "logs") return json(200, { id: agent.id, text: "running the type checker\n", truncated: false })
+    Object.assign(agent, { activity: "stopped", rawState: "stopped", updatedAt: Date.now(), capabilities: finishedCaps })
+    return json(200, { id: agent.id })
+  }
   if (/\/(experimental\/session|session)$/.test(url.pathname)) return json(200, [])
   if (/\/session\/status$/.test(url.pathname)) return json(200, {})
   return json(404, { error: `No fake route for ${req.method} ${url.pathname}` })
@@ -145,10 +180,85 @@ try {
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page.getByRole("button", { name: /Create Session/ }).waitFor({ state: "hidden" })
 
+  // 2c. The rail: state chips, grouping, time window and Claude Code background agents.
+  const rows = page.locator(".hr-native-session-row")
+  await rows.first().waitFor({ state: "visible", timeout: 20_000 })
+  await page.waitForFunction(() => document.querySelectorAll(".hr-native-session-row").length >= 7, null, { timeout: 20_000 })
+  const titlesInRail = async () => page.locator(".hr-native-session-row strong").allTextContents()
+  check("rail: harness Sessions and background agents are all listed (agents the harness listing lacks get a row)", (await rows.count()) === 7, String(await rows.count()))
+  check("rail: background agents are badged", (await page.locator(".hr-native-session-bg").count()) === 3, String(await page.locator(".hr-native-session-bg").count()))
+  const chip = (name) => page.locator(".hr-native-session-filters button", { hasText: name })
+  check("rail: Completed and Failed are one tap away, with counts", /1/.test(await chip("Completed").textContent()) && /2/.test(await chip("Failed").textContent()), `${await chip("Completed").textContent()} | ${await chip("Failed").textContent()}`)
+  check("rail: the default is still the Machine › Project tree", (await page.locator(".hr-native-machine-heading").count()) >= 1 && (await page.locator(".hr-native-flat-group").count()) === 0)
+  check("rail: the finished agent's own state beats the harness listing's 'idle'", /Completed/.test(await page.locator(".hr-native-session-row", { hasText: "Refactor the parser" }).textContent()))
+  await overflow(page, "rail with grouping controls")
+  await inputAudit(page, "rail controls")
+  await shot(page, "02c-rail-tree")
+
+  const groupBySelect = page.getByLabel("Group by")
+  await groupBySelect.selectOption("none")
+  await page.waitForSelector(".hr-native-flat-group")
+  check("group by none: one recent feed across every project, with no machine or project headings", (await page.locator(".hr-native-flat-group").count()) === 1 && (await page.locator(".hr-native-machine-heading").count()) === 0 && (await rows.count()) === 7)
+  check("group by none: newest run first", (await titlesInRail())[0] === "Fix the flaky checkout test", (await titlesInRail()).join(" | "))
+  check("group by none: each row says where it is from", /Studio Mac · alpha/.test(await rows.first().textContent()))
+  await shot(page, "02d-rail-recent")
+
+  await groupBySelect.selectOption("status")
+  await page.waitForSelector('.hr-native-flat-group[data-activity="working"]')
+  const headings = await page.locator(".hr-native-flat-group > .hr-native-project-heading strong").allTextContents()
+  check("group by status: what needs a look comes first, in a fixed order", headings.join(",") === "Working,Failed,Completed,Idle", headings.join(","))
+  check("group by status: the failed background agent is under Failed", /Bump dependencies/.test(await page.locator('.hr-native-flat-group[data-activity="failed"]').textContent()))
+  check("group by status: the failed harness Session is under Failed too", /Migrate the build to ESM/.test(await page.locator('.hr-native-flat-group[data-activity="failed"]').textContent()))
+  check("group by status: the finished agent is under Completed", /Refactor the parser/.test(await page.locator('.hr-native-flat-group[data-activity="completed"]').textContent()))
+  await shot(page, "02e-rail-by-status")
+
+  await groupBySelect.selectOption("project")
+  await page.waitForFunction(() => document.querySelectorAll(".hr-native-flat-group").length === 2)
+  check("group by project: alpha and beta, across harnesses", (await page.locator(".hr-native-flat-group > .hr-native-project-heading strong").allTextContents()).sort().join(",") === "alpha,beta")
+
+  await page.getByLabel("Last ran").selectOption("1h")
+  await page.waitForFunction(() => document.querySelectorAll(".hr-native-session-row").length === 2)
+  check("time window: only what ran in the last hour", (await titlesInRail()).sort().join("|") === "Fix the flaky checkout test|Fix the type errors", (await titlesInRail()).join("|"))
+  await page.getByLabel("Last ran").selectOption("any")
+  await page.waitForFunction(() => document.querySelectorAll(".hr-native-session-row").length === 7)
+
+  await groupBySelect.selectOption("status")
+  await page.reload()
+  await page.waitForSelector(".hr-mobile-nav", { timeout: 20_000 })
+  await page.waitForSelector(".hr-native-flat-group")
+  check("the chosen grouping is remembered across a reload", (await page.getByLabel("Group by").inputValue()) === "status")
+
+  // Attach to the running background agent: a bar with its state and controls, and it can be stopped.
+  const proxyStopBefore = gatewayRequests.filter((request) => /\/stop$/.test(request.path)).length
+  await page.locator(".hr-native-session-row", { hasText: "Fix the type errors" }).click()
+  await page.locator(".hr-bg-agent-bar").waitFor({ state: "visible", timeout: 20_000 })
+  check("attach: a running background agent is shown as Working, read-only", /Working/.test(await page.locator(".hr-bg-agent-pill").textContent()) && /read along but not send messages/.test(await page.locator(".hr-bg-agent-bar").textContent()))
+  check("attach: it offers Output and Stop, and not Continue or Remove while running", (await page.getByRole("button", { name: "Stop", exact: true }).count()) === 1 && (await page.getByRole("button", { name: "Output", exact: true }).count()) === 1 && (await page.getByRole("button", { name: /Continue in background/ }).count()) === 0 && (await page.getByRole("button", { name: "Remove", exact: true }).count()) === 0)
+  await overflow(page, "background agent bar")
+  await shot(page, "02f-background-agent-running")
+  await page.getByRole("button", { name: "Output", exact: true }).click()
+  await page.locator(".hr-bg-agent-logs pre").waitFor({ state: "visible" })
+  // The box opens straight away with a placeholder while the output is fetched through the hub, so wait for
+  // the text itself; reading it once raced the request on a slower machine.
+  await page.waitForFunction(() => /running the type checker/.test(document.querySelector(".hr-bg-agent-logs pre")?.textContent ?? ""), null, { timeout: 15_000 }).catch(() => {})
+  check("attach: its terminal output is shown", /running the type checker/.test(await page.locator(".hr-bg-agent-logs pre").textContent()))
+  check("attach: a read-only Session has one Stop (the bar's), not a second that would abort the wrong thing", (await page.getByRole("button", { name: "Stop", exact: true }).count()) === 1)
+  await page.locator(".hr-bg-agent-actions").getByRole("button", { name: "Stop", exact: true }).click()
+  // Asked inline, not with a native dialog: the first tap only asks.
+  await page.locator(".hr-bg-agent-confirm").waitFor({ state: "visible" })
+  check("attach: Stop asks first, inline", gatewayRequests.filter((request) => /\/stop$/.test(request.path)).length === proxyStopBefore)
+  await page.locator(".hr-bg-agent-confirm").getByRole("button", { name: "Stop", exact: true }).click()
+  await page.waitForFunction(() => /Stopped/.test(document.querySelector(".hr-bg-agent-pill")?.textContent ?? ""), null, { timeout: 15_000 })
+  const stops = gatewayRequests.filter((request) => /\/stop$/.test(request.path))
+  check("attach: Stop reached the machine through the hub with the injected credentials", stops.length === proxyStopBefore + 1 && stops.at(-1).authorization === `Basic ${Buffer.from("harness:gateway-pass").toString("base64")}` && !stops.at(-1).cookie)
+  check("attach: once stopped it can be continued in the background or removed", (await page.getByRole("button", { name: /Continue in background/ }).count()) === 1 && (await page.getByRole("button", { name: "Remove", exact: true }).count()) === 1)
+  await shot(page, "02g-background-agent-stopped")
+  await page.locator(".tdw-mobile-back").first().click().catch(() => {})
+
   // 3. The machine comes from the hub, and is used through the proxy.
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Machines/ }).click()
   await page.locator(".uw-machine-manager").waitFor({ state: "visible" })
-  await page.getByText("Studio Mac", { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 })
+  await page.locator(".uw-machine-manager").getByText("Studio Mac", { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 })
   const card = page.locator(".uw-machine-config-card", { hasText: "Studio Mac" })
   check("machines: the hub's machine is listed and marked as hub-managed", /Managed by your hub/.test(await card.textContent()))
   check("machines: a hub machine has no Edit or Remove", (await card.getByRole("button", { name: /^(Edit|Remove)$/ }).count()) === 0)
@@ -198,7 +308,7 @@ try {
   await page.reload()
   await page.waitForSelector(".hr-mobile-nav", { timeout: 20_000 })
   await page.locator(".hr-mobile-nav").getByRole("button", { name: /Machines/ }).click()
-  await page.getByText("Studio Mac", { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 })
+  await page.locator(".uw-machine-manager").getByText("Studio Mac", { exact: true }).first().waitFor({ state: "visible", timeout: 15_000 })
   const cached = await page.evaluate(async () => {
     const urls = []
     for (const name of await caches.keys()) for (const request of await (await caches.open(name)).keys()) urls.push(new URL(request.url).pathname)

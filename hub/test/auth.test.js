@@ -117,8 +117,14 @@ test("client address and public URL honour forwarded headers only when trusted",
   const headers = { "x-forwarded-for": "203.0.113.5, 10.0.0.1", "x-forwarded-proto": "https", "x-forwarded-host": "hub.example.com", host: "internal:8080" }
   const untrusted = testConfig()
   const trusted = testConfig({ HUB_TRUST_PROXY: "1" })
+  // A client that claims to be someone else: nginx appends the real peer, so the forged value stays first.
+  const spoofed = { "x-forwarded-for": "1.2.3.4, 198.51.100.7", host: "internal:8080" }
+  assert.equal(clientAddress(request(spoofed), trusted.trustProxy), "198.51.100.7")
+  assert.equal(clientAddress(request({ "x-forwarded-for": "9.9.9.9", host: "h" }), trusted.trustProxy), "9.9.9.9", "a single-value header (Caddy overwrites) still works")
   assert.equal(clientAddress(request(headers), untrusted.trustProxy), "10.0.0.9")
-  assert.equal(clientAddress(request(headers), trusted.trustProxy), "203.0.113.5")
+  // The address the trusted proxy itself appended (the LAST entry). The first one is whatever the client
+  // sent, and an appending proxy keeps it in front: trusting it lets anyone rotate their address.
+  assert.equal(clientAddress(request(headers), trusted.trustProxy), "10.0.0.1")
   assert.equal(isSecureRequest(request(headers), untrusted.trustProxy), false)
   assert.equal(publicUrl(request(headers), untrusted), "http://internal:8080")
   assert.equal(publicUrl(request(headers), trusted), "https://hub.example.com")
