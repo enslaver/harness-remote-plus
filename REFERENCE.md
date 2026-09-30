@@ -448,7 +448,7 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.75.1`.
+The `claude` backend defaults to `npx -y @agentclientprotocol/claude-agent-acp@0.84.0`.
 The version is pinned to avoid the same `notarget` issue that motivated pinning the
 PI adapter. Use `--acp-command` and repeated `--acp-arg` options to track a newer
 adapter. The first start downloads the adapter, which is why the handshake allows 90s.

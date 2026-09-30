@@ -51,7 +51,7 @@ test("an ACP adapter already on PATH is preferred over fetching one", async () =
   // that share the fallback seam so PI, Claude and Codex cannot regress independently.
   const expectedFallbacks = {
     pi: ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"],
-    claude: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.75.1", "claude-agent-acp"],
+    claude: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.84.0", "claude-agent-acp"],
     codex: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"]
   }
   for (const [backend, args] of Object.entries(expectedFallbacks)) {
