@@ -1,9 +1,11 @@
 {
-  "name": "harness-remote",
+  "name": "harness-remote-plus",
   "version": "3.1.0",
   "type": "module",
   "bin": {
+    "harness-remote-plus": "bridge/src/launcher.js",
     "harness-remote": "bridge/src/launcher.js",
+    "harness-remote-plus-daemon": "bridge/src/daemon-bin.js",
     "harness-remote-daemon": "bridge/src/daemon-bin.js"
   },
   "scripts": {
@@ -22,9 +24,9 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/giuliastro/harness-remote.git"
+    "url": "git+https://github.com/enslaver/harness-remote-plus.git"
   },
-  "homepage": "https://github.com/giuliastro/harness-remote",
+  "homepage": "https://github.com/enslaver/harness-remote-plus",
   "keywords": [
     "ai-agents",
     "coding-agent",

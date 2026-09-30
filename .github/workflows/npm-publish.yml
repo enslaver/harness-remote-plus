@@ -88,7 +88,7 @@ jobs:
 
           if npm view "$name" name >/dev/null 2>&1; then
             repository="$(npm view "$name" repository.url 2>/dev/null || true)"
-            if [[ "$repository" != *"giuliastro/harness-remote"* ]]; then
+            if [[ "$repository" != *"enslaver/harness-remote-plus"* ]]; then
               echo "::error::npm package '$name' already exists and does not point to this repository: $repository"
               exit 1
             fi

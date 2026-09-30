@@ -75,7 +75,7 @@ and an invocation `actionResult` with a unique `token`. Process and runtime IDs 
 concurrent OMP state from controlling the session. This contract works for both Git and non-Git
 workspaces.
 
-File restoration remains extension-owned. Harness Remote invokes the same action and reloads the
+File restoration remains extension-owned. Harness Remote Plus invokes the same action and reloads the
 authoritative active branch; with extension 1.2.0 or newer, successful non-Git actions restore
 supported workspace file changes as well as conversation state. No bridge package dependency or
 alternate action path is required.
@@ -139,8 +139,11 @@ party entirely.
 - **Adapter:** [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp),
   which wraps the Claude Agent SDK and speaks ACP over stdio. **Pinned to `0.75.1`** in
   `bridge/src/harness-profiles.js`.
-- **Authentication:** the host must already have `claude login` credentials or
-  `ANTHROPIC_API_KEY` available to the adapter. The bridge does not manage Claude credentials.
+- **Authentication:** the host must already have `claude login` credentials, `ANTHROPIC_API_KEY`, or another
+  provider configured for the adapter (Bedrock, Vertex, Foundry, or an Anthropic-compatible gateway through
+  `CLAUDE_CODE_USE_*` / `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN`). The bridge does not manage Claude
+  credentials; the adapter inherits the bridge's environment. A handshake with no accepted login is not fatal.
+  See [PROVIDERS.md](PROVIDERS.md).
 - **Runtime:** Node.js 22 or newer. The first start downloads the pinned adapter through `npx`.
 
 **Assumed:**
@@ -176,8 +179,9 @@ expose agent selection, server slash commands or VCS/diff for this backend.
   published by the Agent Client Protocol project, MIT. **Pinned to `1.1.14`** in
   `bridge/src/harness-profiles.js`.
 - **The adapter embeds `@openai/codex`**, so no separate Codex installation is needed on the host —
-  but credentials still come from `codex login` (ChatGPT account) or an `OPENAI_API_KEY` in the
-  bridge process environment.
+  but credentials still come from `codex login` (ChatGPT account), an `OPENAI_API_KEY` in the
+  bridge process environment, or a `model_providers` entry in `~/.codex/config.toml` for an
+  OpenAI-compatible endpoint. See [PROVIDERS.md](PROVIDERS.md).
 - **Pinned for the same reason as PI and Claude:** an unpinned `npx -y` default fails live with
   `notarget` when a release outruns its own tarball in the registry.
 
@@ -187,7 +191,7 @@ read from a spec:**
 | Assumption | What breaks if it changes |
 |---|---|
 | `session/list` enumerates every Codex thread on the machine | the session list empties |
-| Rollouts stay at `~/.codex/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<sessionId>.jsonl` | `createCodexHistoryLoader` finds nothing and every session Codex holds open shows as empty |
+| Rollouts stay at `<CODEX_HOME>/sessions/<yyyy>/<mm>/<dd>/rollout-<timestamp>-<sessionId>.jsonl`, where `CODEX_HOME` defaults to `~/.codex` | `createCodexHistoryLoader` finds nothing and every session Codex holds open shows as empty |
 | A rollout records the turns the user saw as `event_msg` records. Current rollouts use `item_completed` with `UserMessage.content[type=text]`, `AgentMessage.content[type=Text]`, and `Reasoning.summary_text`; legacy rollouts use `user_message.message`, `agent_message.message`, and `agent_reasoning.text` | the transcript of an externally-held session goes empty, or starts showing the instruction blocks Codex feeds the model, which `response_item` carries under the `user` role |
 | Model config option ids are bare (`gpt-5.2`), not `provider/model` | covered by the same bare-id handling the Claude Code backend proved; if ids gain a provider prefix they still parse, under that provider name |
 | `reasoning_effort` and `mode` config options are advertised but not exposed | they stay invisible in the app; no crash, just unused surface |

@@ -1,6 +1,6 @@
-# Contributing to Harness Remote
+# Contributing to Harness Remote Plus
 
-Thanks for wanting to work on this. Harness Remote is a local-first control plane for native
+Thanks for wanting to work on this. Harness Remote Plus is a local-first control plane for native
 coding-agent Sessions. It discovers the machines, Projects and harness capabilities that already
 exist, then lets users observe and continue work from web, desktop or Android. OpenCode, Oh My Pi
 (OMP), PI, Claude Code and Codex CLI are supported today. Adding a harness should mean adding a
@@ -112,7 +112,7 @@ use narrower named tiers where appropriate (`test:ci:baseline` and
 
 ## Product and compatibility rules
 
-Harness Remote presents native Sessions from the machines users connect. Do not add a new
+Harness Remote Plus presents native Sessions from the machines users connect. Do not add a new
 user-facing abstraction that duplicates a harness Session or claim that one harness's hidden
 context has been transferred to another.
 
@@ -220,7 +220,7 @@ than by hand.
 
 1. Bump `version` in `web/package.json`.
 2. Merge the fully validated release candidate to `main`.
-3. Make the final merge commit title exactly `Release Harness Remote X.Y.Z` (or begin with that
+3. Make the final merge commit title exactly `Release Harness Remote Plus X.Y.Z` (or begin with that
    phrase) and give it a non-empty body containing the curated release summary.
 4. `.github/workflows/cut-release-tag.yml` reads the package version, creates the annotated
    `vX.Y.Z` tag if it does not already exist, and explicitly dispatches the Android and Desktop
@@ -281,8 +281,8 @@ that needs changing afterwards goes in separate commits on top. Squashing is up 
 
 ## Where to start
 
-- [Open issues](https://github.com/giuliastro/harness-remote/issues), especially any labelled
-  [`help wanted`](https://github.com/giuliastro/harness-remote/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
+- [Open issues](https://github.com/enslaver/harness-remote-plus/issues), especially any labelled
+  [`help wanted`](https://github.com/enslaver/harness-remote-plus/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22).
   A new harness is the obvious next step: the profile mechanism in `bridge/src/harness-profiles.js`
   is what PI, Claude Code and Codex CLI were added through, so it is a well-worn path rather than
   new ground.

@@ -1,6 +1,6 @@
 # Real-harness release gate
 
-Harness Remote treats installed coding harnesses as the authority for their Native Sessions. Unit tests and browser fixtures are necessary, but they cannot prove that the current OpenCode, Codex, Claude, OMP and PI integrations still behave correctly against real installed harnesses.
+Harness Remote Plus treats installed coding harnesses as the authority for their Native Sessions. Unit tests and browser fixtures are necessary, but they cannot prove that the current OpenCode, Codex, Claude, OMP and PI integrations still behave correctly against real installed harnesses.
 
 This gate turns the existing Session-first soak into a repeatable release check and records what was actually verified on a machine.
 
@@ -99,7 +99,7 @@ The soak resolves every selector against the live catalog before creating the te
 
 Variant coverage is also constrained to those selected model identities. If none of the known-working selected models advertises a variant, that optional variant leg is skipped rather than testing a different provider/model whose inference has not been established on that machine.
 
-Harnesses without `--model` keep the existing automatic selection of the first three distinct advertised model identities. Explicit selection only changes release-test evidence; it does not change Harness Remote runtime model discovery or user-facing model behavior.
+Harnesses without `--model` keep the existing automatic selection of the first three distinct advertised model identities. Explicit selection only changes release-test evidence; it does not change Harness Remote Plus runtime model discovery or user-facing model behavior.
 
 A harness cannot be both listed in `--inference-unavailable` and given explicit models in the same run.
 
@@ -107,7 +107,7 @@ A harness cannot be both listed in `--inference-unavailable` and given explicit 
 
 A harness can be installed and integrated correctly while none of its advertised provider models is usable on the machine under test. For example, a catalog can advertise models whose provider credential or subscription is not configured locally.
 
-Do not let repeated inference timeouts masquerade as a Harness Remote regression. Declare only the affected selected harnesses explicitly:
+Do not let repeated inference timeouts masquerade as a Harness Remote Plus regression. Declare only the affected selected harnesses explicitly:
 
 ```bash
 npm run gate:real-harness -- \

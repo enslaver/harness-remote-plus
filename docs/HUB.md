@@ -1,6 +1,6 @@
-# Harness Remote Hub
+# Harness Remote Plus Hub
 
-A self-hosted server that gives all your Harness Remote installs one home:
+A self-hosted server that gives all your Harness Remote Plus installs one home:
 
 - **the web app**, served from one address, usable from an iPhone;
 - **a registry of every machine** (Postgres): identity, addresses, agents, configuration and its history, and the
@@ -17,7 +17,7 @@ machine's own gateway.
    (session cookie only)     :8080     ├──▶ Loki       logs + events
                                        └──▶ machines   proxied web UI, over your LAN / VPN
                                                 ▲
-              npx harness-remote --hub … ───────┘  enrolls once, then heartbeats and ships logs
+              npx --yes github:enslaver/harness-remote-plus --hub … ───────┘  enrolls once, then heartbeats and ships logs
 ```
 
 ## Quick start
@@ -76,7 +76,9 @@ state, and the Session inventory.
   Session list.
 - **Logs** are what the daemon prints, tapped from stdout/stderr. Lines are scrubbed of the gateway password, hub
   tokens, `Authorization` headers, `--password`/`--hub-token` arguments and common API-key shapes *before* they are
-  queued, so they never leave the machine unredacted.
+  queued, so they never leave the machine unredacted. The values of provider credentials in the bridge's environment
+  (`ANTHROPIC_AUTH_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `OPENAI_API_KEY`, ...) are scrubbed wherever they appear. This
+  is best-effort; see [PROVIDERS.md](PROVIDERS.md#secrets-and-logs).
 
 ## HTTPS for iPhone
 
@@ -120,7 +122,7 @@ the headers, so set it only when the proxy is the only way in.
 
 ### Add to Home Screen
 
-In Safari, open the hub's address → Share → **Add to Home Screen**. It opens full-screen with the Harness Remote
+In Safari, open the hub's address → Share → **Add to Home Screen**. It opens full-screen with the Harness Remote Plus
 icon. Sign in once inside it (the home-screen app keeps its own cookies). The console lives at `/hub/`, the workspace
 at `/`.
 
