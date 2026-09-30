@@ -1,9 +1,9 @@
 {
-  "name": "harness-remote-hub",
+  "name": "harness-remote-plus-hub",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Self-hosted hub for Harness Remote: web UI, machine registry (Postgres), log and session-event collection (Loki).",
+  "description": "Self-hosted hub for Harness Remote Plus: web UI, machine registry (Postgres), log and session-event collection (Loki).",
   "scripts": {
     "start": "node src/main.js",
     "test": "node --test --test-concurrency=4 \"test/*.test.js\"",

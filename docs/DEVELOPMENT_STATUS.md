@@ -11,7 +11,7 @@
 - Frozen RC branches are immutable. Any product-code change after a freeze requires a new RC.
 - ACP, Native Session, routing, models and harness-runtime changes require regression review against the reliability contracts.
 
-## Harness Remote 3.1.0 release state
+## Harness Remote Plus 3.1.0 release state
 
 The 3.1.0 integration line is release-ready and the repository owner has accepted the final desktop and physical Android validation.
 
@@ -51,7 +51,7 @@ Until the release merge completes, `main` remains the 3.0.2 stable line.
 2. Freeze `codex/release-candidate-3.1.0-rc6` from that exact integration head.
 3. Open the release PR from the frozen 3.1 line to `main`.
 4. Require the full PR gate on the exact release head.
-5. Merge with a commit title beginning `Release Harness Remote 3.1.0` and a curated commit body.
+5. Merge with a commit title beginning `Release Harness Remote Plus 3.1.0` and a curated commit body.
 6. The `Cut release tag` workflow creates annotated tag `v3.1.0` from that release commit and dispatches Android/Desktop release builds.
 7. Android publishes the GitHub Release first; desktop packaging attaches Windows, macOS and Linux artifacts.
 

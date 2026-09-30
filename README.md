@@ -1,6 +1,6 @@
 <div align="center">
 
-# Harness Remote
+# Harness Remote Plus
 
 ### Your coding sessions. Any supported agent. Any device.
 
@@ -8,20 +8,23 @@
 
 Run, observe, resume and continue work across **Codex CLI, Claude Code, OpenCode, Oh My Pi and PI** from desktop, web or Android — while code, credentials and native Sessions stay on your own machines.
 
-[![GitHub stars](https://img.shields.io/github/stars/giuliastro/harness-remote?style=flat&logo=github)](https://github.com/giuliastro/harness-remote/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/enslaver/harness-remote-plus?style=flat&logo=github)](https://github.com/enslaver/harness-remote-plus/stargazers)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-555)](LICENSE)
+[![Fork of harness-remote](https://img.shields.io/badge/fork%20of-giuliastro%2Fharness--remote-555?logo=github)](https://github.com/giuliastro/harness-remote)
 
 </div>
 
-![Harness Remote workspace](docs/images/rhv3.png)
+![Harness Remote Plus workspace](docs/images/rhv3.png)
 
-> **Harness Remote is not another coding agent.** It is the remote-control and continuity layer around the coding agents you already use.
+> **Harness Remote Plus is a fork of [Harness Remote](https://github.com/giuliastro/harness-remote) with enhancements.** The original project, its architecture and the great majority of this code were created by [Giulio Ardoino (@giuliastro)](https://github.com/giuliastro) and its contributors, and are used here under the Apache-2.0 license. Full credit for the foundation goes to them. See [What this fork adds](#what-this-fork-adds) and [Credits](#credits).
+
+> **Harness Remote Plus is not another coding agent.** It is the remote-control and continuity layer around the coding agents you already use.
 
 ## Quick start
 
 ### Desktop
 
-Download Harness Remote from the [latest release](https://github.com/giuliastro/harness-remote/releases/latest) and open it.
+Download Harness Remote Plus from the [latest release](https://github.com/enslaver/harness-remote-plus/releases/latest) and open it.
 
 On Windows and macOS, the local computer works immediately: **you do not need to start a gateway in a terminal**. The desktop app starts and supervises its local Machine runtime automatically.
 
@@ -32,23 +35,23 @@ On the computer you want to control, install Node.js 20+ and make sure at least 
 Then run:
 
 ```bash
-npx harness-remote
+npx --yes github:enslaver/harness-remote-plus
 ```
 
 Direct-from-GitHub fallback:
 
 ```bash
-npx --yes github:giuliastro/harness-remote
+npx --yes github:enslaver/harness-remote-plus
 ```
 
-Keep that terminal open. Harness Remote automatically detects the installed coding agents, chooses available ports, generates credentials and starts one Machine gateway.
+Keep that terminal open. Harness Remote Plus automatically detects the installed coding agents, chooses available ports, generates credentials and starts one Machine gateway.
 
 Common options are optional:
 
 ```bash
-npx harness-remote --root ~/dev
-npx harness-remote --port 4900
-npx harness-remote --cors https://giuliastro.github.io
+npx --yes github:enslaver/harness-remote-plus --root ~/dev
+npx --yes github:enslaver/harness-remote-plus --port 4900
+npx --yes github:enslaver/harness-remote-plus --cors https://giuliastro.github.io
 ```
 
 ### Android
@@ -64,11 +67,7 @@ The QR uses a short-lived one-time pairing token. Manual address/credential entr
 
 ### Web / PWA
 
-Use the [hosted web app](https://giuliastro.github.io/harness-remote/) and allow that browser origin when starting the remote gateway:
-
-```bash
-npx harness-remote --cors https://giuliastro.github.io
-```
+The easiest way to get the web app is the [hub](docs/HUB.md), which serves it (including an iPhone-friendly layout) from your own server. This fork does not publish a hosted copy. The upstream project hosts one at `https://giuliastro.github.io/harness-remote/`, which you can point at a gateway started with `--cors https://giuliastro.github.io`, but it is built from upstream and will not have this fork's additions.
 
 For local web development:
 
@@ -81,7 +80,7 @@ npm run dev
 Then start the gateway with:
 
 ```bash
-npx harness-remote --cors http://localhost:5173
+npx --yes github:enslaver/harness-remote-plus --cors http://localhost:5173
 ```
 
 See the [Quick start guide](docs/QUICK_START.md) for advanced options and troubleshooting.
@@ -98,10 +97,24 @@ docker compose up -d --build  # hub + Postgres + Loki, on http://127.0.0.1:8080
 Then, on each computer you want to add, use the command the hub console shows you:
 
 ```bash
-npx harness-remote --hub https://hub.example.com --hub-token hre_…
+npx --yes github:enslaver/harness-remote-plus --hub https://hub.example.com --hub-token hre_…
 ```
 
-The hub URL is remembered, so the next `npx harness-remote` reports again on its own. Machines stay in control of their own credentials; the hub proxies browser traffic to them and never hands the machine password to the browser. See [docs/HUB.md](docs/HUB.md) for HTTPS (needed for iPhone home-screen installs), Grafana, security and operations.
+The hub URL is remembered, so the next `npx --yes github:enslaver/harness-remote-plus` reports again on its own. Machines stay in control of their own credentials; the hub proxies browser traffic to them and never hands the machine password to the browser. See [docs/HUB.md](docs/HUB.md) for HTTPS (needed for iPhone home-screen installs), Grafana, security and operations.
+
+## What this fork adds
+
+Everything in upstream Harness Remote works as before. On top of it, Harness Remote Plus adds:
+
+- **A self-hosted [hub](docs/HUB.md)** — one address for every machine: web UI, a Postgres registry of machines and Sessions, log collection into Loki (with a Grafana fleet dashboard), a same-origin machine proxy and reachability prober. Ships as a Docker Compose stack behind Caddy.
+- **`--hub` on the bridge** — a machine enrolls once with a token, then reports its heartbeat, an inventory of its Sessions and its redacted logs on its own.
+- **iPhone Safari support** — a mobile-first hub console, an installable home-screen app and a service worker that never caches live data.
+- **Session start and last-run times, search and time filters** — in the workspace and in the hub console.
+- **Agent status and grouping** — every Session shows working / needs you / idle / completed / failed / stopped; group by status, project, machine or agent.
+- **Claude Code background agents** — list, follow, start, stop, continue and remove `claude --bg` agents from any device. See [Background agents, status and grouping](docs/BACKGROUND_AGENTS.md).
+- **Provider-agnostic harnesses** — validated against each harness's default provider and against custom endpoints (Amazon Bedrock, Google Vertex, and OpenAI-/Anthropic-compatible gateways), with hardening where they differed. See [Providers and custom endpoints](docs/PROVIDERS.md).
+
+The full list, with the commits behind each item, is in [docs/FORK_CHANGES.md](docs/FORK_CHANGES.md).
 
 ## What it gives you
 
@@ -119,7 +132,7 @@ The hub URL is remembered, so the next `npx harness-remote` reports again on its
 
 ## Native Sessions stay authoritative
 
-Harness Remote does not create a synthetic universal conversation model.
+Harness Remote Plus does not create a synthetic universal conversation model.
 
 The coding agent still owns:
 
@@ -131,7 +144,7 @@ The coding agent still owns:
 - model behavior;
 - Stop/cancel and resume semantics.
 
-Harness Remote owns the layer around it:
+Harness Remote Plus owns the layer around it:
 
 - Machines and Projects;
 - Session discovery and presentation;
@@ -141,7 +154,7 @@ Harness Remote owns the layer around it:
 - reconciliation and diagnostics;
 - desktop, web and Android access.
 
-That means you can start in a normal CLI, open Harness Remote later, find the same native Session and continue from there.
+That means you can start in a normal CLI, open Harness Remote Plus later, find the same native Session and continue from there.
 
 ## Supported coding agents
 
@@ -153,7 +166,7 @@ That means you can start in a normal CLI, open Harness Remote later, find the sa
 | **Oh My Pi (OMP)** | ACP adapter |
 | **PI** | ACP adapter |
 
-Harness Remote surfaces capabilities advertised by the harness instead of inventing controls the harness does not support.
+Harness Remote Plus surfaces capabilities advertised by the harness instead of inventing controls the harness does not support.
 
 See the [capability matrix](docs/V3_HARNESS_CAPABILITY_MATRIX.md) for the detailed runtime contract.
 
@@ -185,11 +198,21 @@ Your machine keeps:
 - native Session persistence;
 - the real development environment.
 
-Use remote gateways over a trusted LAN or VPN. **Do not expose a Harness Remote gateway directly to the public internet.**
+Use remote gateways over a trusted LAN or VPN. **Do not expose a Harness Remote Plus gateway directly to the public internet.**
 
-`--root` limits which directories Harness Remote offers for Project selection. It is not an operating-system sandbox; coding agents still run with the permissions of the account that launched them.
+`--root` limits which directories Harness Remote Plus offers for Project selection. It is not an operating-system sandbox; coding agents still run with the permissions of the account that launched them.
 
 See [REFERENCE.md](REFERENCE.md) for security and backend details.
+
+## Credits
+
+**Harness Remote** was created by [Giulio Ardoino (@giuliastro)](https://github.com/giuliastro), with contributions from Michael Deinhardt, Baylar Sadigov, Andre Brait, Lucca Pinto, Gervaso, Joshua Trimm and others. This project is a fork of [giuliastro/harness-remote](https://github.com/giuliastro/harness-remote) and is distributed under the same [Apache-2.0 license](LICENSE); the original copyright and license terms are retained. If this project is useful to you, please star and support the original.
+
+Harness Remote Plus is maintained by [@enslaver](https://github.com/enslaver). It is not affiliated with or endorsed by the upstream authors.
+
+### Renaming note
+
+The project is now called **Harness Remote Plus** (`harness-remote-plus`). For compatibility with existing installs, the old `harness-remote` and `harness-remote-daemon` commands still work, and the `HARNESS_REMOTE_*` environment variables, the `~/.harness-remote` state directory and the desktop app's data directory keep their original names.
 
 ## Development
 
@@ -212,6 +235,8 @@ npm run electron:dev
 ## Documentation
 
 - [Quick start](docs/QUICK_START.md)
+- [What this fork adds](docs/FORK_CHANGES.md)
+- [Providers and custom endpoints (Bedrock, Vertex, gateways)](docs/PROVIDERS.md)
 - [Hub: Docker stack, registry and logs](docs/HUB.md)
 - [Background agents, agent status and grouping](docs/BACKGROUND_AGENTS.md)
 - [Architecture and roadmap](docs/HARNESS_3_ROADMAP.md)

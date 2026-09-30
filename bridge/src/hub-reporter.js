@@ -3,7 +3,7 @@ import { hostname, networkInterfaces } from "node:os"
 import { collectSessions } from "./hub-inventory.js"
 import { clearHubToken, resolveHubOptions, writeHubState } from "./hub-options.js"
 import { describeNetworkError, requestJson } from "./http-json.js"
-import { LogTee, createRedactor } from "./log-tee.js"
+import { LogTee, createRedactor, providerSecretsFromEnvironment } from "./log-tee.js"
 
 const DEFAULT_INTERVAL_MS = 30_000
 const MAX_BACKOFF_MS = 5 * 60_000
@@ -368,7 +368,7 @@ export async function prepareHubReporting({ flags, environment = process.env, co
     return null
   }
 
-  const redact = createRedactor([config.password, options.enrollmentToken, options.machineToken])
+  const redact = createRedactor([config.password, options.enrollmentToken, options.machineToken, ...providerSecretsFromEnvironment(environment)])
   const tee = new LogTee({ redact })
   tee.attach(streams[0], "stdout")
   tee.attach(streams[1], "stderr")

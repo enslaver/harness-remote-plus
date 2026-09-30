@@ -1,6 +1,6 @@
 {
-  "name": "Harness Remote",
-  "short_name": "Harness Remote",
+  "name": "Harness Remote Plus",
+  "short_name": "Harness Remote Plus",
   "description": "Your projects. Any coding agent. One workspace. Start a conversation with Codex, Claude, OpenCode, OMP or PI and continue it with another.",
   "start_url": ".",
   "scope": ".",

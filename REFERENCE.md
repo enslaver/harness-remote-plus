@@ -1,10 +1,10 @@
-# Harness Remote legacy and backend reference
+# Harness Remote Plus legacy and backend reference
 
 This reference keeps the detailed adapter, packaging and compatibility notes that do not belong in
 the day-to-day product guide. For the current end-to-end path, start with the [README](README.md)
 and [quick start](docs/QUICK_START.md).
 
-Harness Remote is a local-first control plane for the native coding-agent Sessions that already run
+Harness Remote Plus is a local-first control plane for the native coding-agent Sessions that already run
 on your machines. Add a machine, select a Project, and work with the native Sessions and harnesses
 it exposes. The current product does not require users to configure a separate backend profile for
 each harness.
@@ -28,7 +28,7 @@ when one of them changes are recorded in [docs/DEPENDENCIES.md](docs/DEPENDENCIE
 
 Support levels differ by what each harness exposes. The [OpenCode](#opencode-server-setup), [OMP](#oh-my-pi-bridge-setup), [PI](#pi-bridge-setup), [Claude Code](#claude-code-bridge-setup), and [Codex CLI](#codex-bridge-setup) sections below document the setup and per-backend limitations.
 
-> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/giuliastro/harness-remote`) or this README and ask it to set up Harness Remote. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
+> **Note for AI/harness systems**: This repository is self-documenting. To configure a supported harness and the app autonomously, point your AI assistant to this repository URL (`https://github.com/enslaver/harness-remote-plus`) or this README and ask it to set up Harness Remote Plus. Each supported harness has its own setup section below, and adding a harness means adding a backend entry plus its section.
 
 ## Legacy screenshots
 
@@ -133,7 +133,7 @@ diffs — behaves exactly as it does on a phone. The backend setup below is iden
 
 The installable desktop app packages the same `web/` UI inside a secure Electron shell, for Windows,
 macOS and Linux. Every `v*` tag builds all three and attaches them to the
-[release](https://github.com/giuliastro/harness-remote/releases/latest), next to the Android APK.
+[release](https://github.com/enslaver/harness-remote-plus/releases/latest), next to the Android APK.
 
 To build one yourself, run `npm ci` in `web/` and then the script for the platform you are sitting
 at — electron-builder does not cross-compile, so each artifact is built on its own OS:
@@ -161,7 +161,7 @@ proxies your machines behind one origin), browsers offer to add it to the home s
 its own standalone window. This repository does not publish a hosted copy: there is no GitHub Pages deploy
 here, so a hosted web app is whatever you (or the hub) serve from `web/dist`.
 
-The packaged builds in [Releases](https://github.com/giuliastro/harness-remote/releases/latest) — the Android
+The packaged builds in [Releases](https://github.com/enslaver/harness-remote-plus/releases/latest) — the Android
 APK and the three desktop apps — come from `v*` tags.
 
 - A service worker caches the app shell (`index.html`, the manifest, and the icons) plus other
@@ -200,7 +200,7 @@ Every release carries the Android APK plus desktop builds for all three platform
 | macOS | `-mac-arm64-unsigned.dmg` (Apple Silicon) or `-mac-x64-unsigned.dmg` (Intel), `.zip` alternatives |
 | Linux | `-linux-x86_64.AppImage` or `-linux-amd64.deb` |
 
-https://github.com/giuliastro/harness-remote/releases/latest
+https://github.com/enslaver/harness-remote-plus/releases/latest
 
 The desktop artifacts are unsigned, so expect a SmartScreen or Gatekeeper prompt on first launch —
 [Desktop app](#desktop-app) explains how to get past it. The web app needs no download at all: it is
@@ -252,7 +252,7 @@ If remote/mobile cannot connect, open TCP 4096 in your OS firewall and network f
 
 ### Oh My Pi Bridge Setup
 
-Harness Remote connects to OMP through the bridge included in this repository. The bridge starts `omp acp` on the same computer and translates its ACP stdio protocol to the app's HTTP/SSE API. To show sessions created by another OMP process without loading and interrupting them, it reads the append-only user/assistant transcript under OMP's session directory; it does not modify OMP state.
+Harness Remote Plus connects to OMP through the bridge included in this repository. The bridge starts `omp acp` on the same computer and translates its ACP stdio protocol to the app's HTTP/SSE API. To show sessions created by another OMP process without loading and interrupting them, it reads the append-only user/assistant transcript under OMP's session directory; it does not modify OMP state.
 
 #### Prerequisites
 
@@ -365,7 +365,7 @@ Do not expose the bridge directly to the Internet. Use Tailscale, another VPN, o
 
 ### PI Bridge Setup
 
-Harness Remote connects to PI through the same ACP bridge, using the community
+Harness Remote Plus connects to PI through the same ACP bridge, using the community
 [`@automatalabs/pi-acp`](https://www.npmjs.com/package/@automatalabs/pi-acp)
 adapter, which embeds PI through its published SDK and speaks ACP over stdio.
 The bridge starts the adapter and translates ACP into the HTTP/SSE API used by
@@ -425,7 +425,7 @@ reverse proxy.
 
 ### Claude Code Bridge Setup
 
-Harness Remote connects to Claude Code through the same ACP bridge, using the official
+Harness Remote Plus connects to Claude Code through the same ACP bridge, using the official
 [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp)
 adapter, which wraps the Claude Agent SDK and speaks ACP over stdio.
 
@@ -490,7 +490,7 @@ LAN, VPN, or TLS-terminating reverse proxy.
 
 ### Codex Bridge Setup
 
-Harness Remote connects to Codex CLI through the same ACP bridge, using the official
+Harness Remote Plus connects to Codex CLI through the same ACP bridge, using the official
 [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp)
 adapter, which embeds the OpenAI Codex engine and speaks ACP over stdio — no separate Codex
 installation is needed.

@@ -1,17 +1,17 @@
-# Harness Remote 3.0 harness capability matrix
+# Harness Remote Plus 3.0 harness capability matrix
 
-This document records the runtime contract Harness Remote 3.0 expects from each supported coding harness.
+This document records the runtime contract Harness Remote Plus 3.0 expects from each supported coding harness.
 
-The model list is only one part of that contract. Harness Remote also needs to know how a harness communicates, how tool activity is represented, which model controls are actually advertised, which component owns Session truth, and which lifecycle guarantees can be relied on.
+The model list is only one part of that contract. Harness Remote Plus also needs to know how a harness communicates, how tool activity is represented, which model controls are actually advertised, which component owns Session truth, and which lifecycle guarantees can be relied on.
 
 The machine snapshot exposes the same structured information as `agent.contract`. Boolean
 capability flags remain for compatibility, while the structured contract is the current direction.
 
 ## Product rule
 
-Harness Remote owns the **work-continuity** layer. The coding harness owns its **Native Session**.
+Harness Remote Plus owns the **work-continuity** layer. The coding harness owns its **Native Session**.
 
-Harness Remote must not flatten harness-specific capabilities into a fake universal Session protocol. If a harness does not advertise a control, Harness Remote does not invent it.
+Harness Remote Plus must not flatten harness-specific capabilities into a fake universal Session protocol. If a harness does not advertise a control, Harness Remote Plus does not invent it.
 
 ## Matrix
 
@@ -51,7 +51,7 @@ OMP all pass real-harness tests on the exact implementation, including Windows w
 
 ### Work continuity
 
-Harness Remote owns:
+Harness Remote Plus owns:
 
 - stable work identity and Project association;
 - ordered Native Session references;
@@ -87,7 +87,7 @@ Exact real-machine behavior remains part of the 3.0 release gate. This matrix do
 
 ### OpenCode
 
-OpenCode uses HTTP for control. Harness Remote owns one upstream OpenCode global SSE connection and fans events out to downstream web, desktop and Android clients. Reconnecting clients must not create an unbounded number of OpenCode upstream subscriptions.
+OpenCode uses HTTP for control. Harness Remote Plus owns one upstream OpenCode global SSE connection and fans events out to downstream web, desktop and Android clients. Reconnecting clients must not create an unbounded number of OpenCode upstream subscriptions.
 
 ### ACP harnesses
 
@@ -95,7 +95,7 @@ OMP, PI, Codex and Claude are controlled through ACP adapters over stdio JSON-RP
 
 ## Variant and reasoning metadata
 
-Harness Remote preserves controls that the running harness actually advertises:
+Harness Remote Plus preserves controls that the running harness actually advertises:
 
 - OMP: `thinking` when advertised;
 - PI: `thinkingLevel` or compatible runtime aliases when advertised;

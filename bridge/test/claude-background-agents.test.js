@@ -281,6 +281,7 @@ test("start refuses what it must: no prompt, oversized prompt, unknown options, 
     await refused({ permissionMode: "yolo" }, /Permission mode/)
     await refused({ model: "opus; rm -rf /" }, /model name is not valid/)
     await refused({ model: "-x" }, /model name is not valid/)
+    await refused({ model: "x".repeat(257) }, /model name is not valid/)
     await refused({ name: 5 }, /name is not valid/)
     await assert.rejects(() => f.service.start({ prompt: "ok" }), (error) => error.status === 400 && /directory is required/.test(error.message))
     await assert.rejects(() => f.service.start({ prompt: "ok", directory: os.tmpdir() }), (error) => error.status === 403 && error.code === "directory_not_allowed" && /outside the configured --root boundary/.test(error.message))
@@ -505,4 +506,13 @@ test("a missing program is recognised however the platform reports it (ENOENT, o
   await service.list()
   assert.equal(runs, 1, "the negative answer is remembered (a machine without Claude is not asked again for minutes)")
   await assert.rejects(() => service.start({ prompt: "hi", directory: os.tmpdir() }), (error) => error.code === "claude_not_found" && error.status === 503)
+})
+
+test("child processes keep every provider variable: Bedrock, Vertex, Foundry and gateways", () => {
+  const provider = {
+    CLAUDE_CODE_USE_BEDROCK: "1", AWS_REGION: "us-east-1", AWS_PROFILE: "work", AWS_BEARER_TOKEN_BEDROCK: "b", ANTHROPIC_BEDROCK_BASE_URL: "https://bedrock.example",
+    CLAUDE_CODE_USE_VERTEX: "1", ANTHROPIC_VERTEX_PROJECT_ID: "p", CLOUD_ML_REGION: "us-east5", CLAUDE_CODE_USE_FOUNDRY: "1",
+    ANTHROPIC_BASE_URL: "https://gateway.example", ANTHROPIC_AUTH_TOKEN: "t", ANTHROPIC_MODEL: "gw/model", ANTHROPIC_DEFAULT_SONNET_MODEL: "s"
+  }
+  assert.deepEqual(childEnvironment({ ...provider, CLAUDE_CODE_SESSION_ID: "parent" }), provider)
 })

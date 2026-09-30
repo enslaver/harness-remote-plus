@@ -1,10 +1,10 @@
 {
-  "name": "harness-remote-bridge",
+  "name": "harness-remote-plus-bridge",
   "version": "0.1.7",
   "private": true,
   "type": "module",
   "bin": {
-    "harness-remote-bridge": "./src/cli.js",
+    "harness-remote-plus-bridge": "./src/cli.js",
     "harness-remote-daemon": "./src/daemon-bin.js"
   },
   "scripts": {

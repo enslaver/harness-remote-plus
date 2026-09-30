@@ -22,7 +22,7 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("Harness Remote crashed", error, info.componentStack)
+    console.error("Harness Remote Plus crashed", error, info.componentStack)
     // On a hub this leaves a record in its log store; anywhere else it is a no-op.
     reportClientError(error, { componentStack: info.componentStack?.slice(0, 2_000), boundary: true })
   }
@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children
     return (
       <div className="crash-screen" role="alert">
-        <h1>Harness Remote could not start</h1>
+        <h1>Harness Remote Plus could not start</h1>
         <p>
           Something went wrong while loading the app. Resetting clears the saved workspace
           configuration, including your configured machines, and reloads. Your language and theme

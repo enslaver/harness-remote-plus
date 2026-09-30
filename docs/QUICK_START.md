@@ -1,17 +1,17 @@
-# Harness Remote quick start
+# Harness Remote Plus quick start
 
-Harness Remote connects your clients to the computers where your repositories, coding-agent CLIs, credentials and native Sessions already live.
+Harness Remote Plus connects your clients to the computers where your repositories, coding-agent CLIs, credentials and native Sessions already live.
 
 The normal setup is intentionally small:
 
 - **Windows/macOS desktop:** open the app; the local computer is managed automatically.
 - **Android:** start the gateway on the computer you want to control and scan its QR code.
-- **Another remote computer:** run one Harness Remote gateway on that computer.
+- **Another remote computer:** run one Harness Remote Plus gateway on that computer.
 - **Web/PWA:** connect to a reachable gateway and allow the browser origin with `--cors`.
 
 ## Windows and macOS: local machine needs no setup
 
-Install and open the Harness Remote desktop app.
+Install and open the Harness Remote Plus desktop app.
 
 For the computer where the desktop app is running, you do **not** need to start `harness-remote`, a bridge or a daemon in a terminal. The desktop app starts and supervises its own local Machine runtime and discovers the supported coding-agent CLIs installed on that computer.
 
@@ -27,7 +27,7 @@ Requirements on the computer you want to control:
 Then run:
 
 ```bash
-npx --yes github:giuliastro/harness-remote
+npx --yes github:enslaver/harness-remote-plus
 ```
 
 Keep the terminal open while using that machine remotely.
@@ -59,7 +59,7 @@ You normally do not need to choose one manually.
 
 With the gateway running on the computer you want to control:
 
-1. Open Harness Remote on Android.
+1. Open Harness Remote Plus on Android.
 2. Open **Machines**.
 3. Tap **Scan machine QR code**.
 4. Scan the QR shown in the gateway terminal.
@@ -88,7 +88,7 @@ You do not need to expose a separate endpoint for Codex, Claude, OpenCode, OMP a
 The plain command is the recommended starting point:
 
 ```bash
-npx --yes github:giuliastro/harness-remote
+npx --yes github:enslaver/harness-remote-plus
 ```
 
 Only add options when you need to override the automatic behavior.
@@ -96,23 +96,23 @@ Only add options when you need to override the automatic behavior.
 ### Limit the Project roots
 
 ```bash
-npx --yes github:giuliastro/harness-remote --root ~/dev
+npx --yes github:enslaver/harness-remote-plus --root ~/dev
 ```
 
-`--root` limits which directories Harness Remote offers for Project selection. It is not an operating-system sandbox for the coding agents themselves.
+`--root` limits which directories Harness Remote Plus offers for Project selection. It is not an operating-system sandbox for the coding agents themselves.
 
 ### Use a fixed port
 
 ```bash
-npx --yes github:giuliastro/harness-remote --port 4900
+npx --yes github:enslaver/harness-remote-plus --port 4900
 ```
 
-Without `--port`, Harness Remote chooses an available port automatically.
+Without `--port`, Harness Remote Plus chooses an available port automatically.
 
 ### Use your own credentials
 
 ```bash
-npx --yes github:giuliastro/harness-remote \
+npx --yes github:enslaver/harness-remote-plus \
   --username harness \
   --password 'choose-a-strong-password'
 ```
@@ -124,13 +124,13 @@ Without these options, the launcher generates credentials automatically.
 For local Vite development:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --cors http://localhost:5173
+npx --yes github:enslaver/harness-remote-plus --cors http://localhost:5173
 ```
 
 For the hosted client:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --cors https://giuliastro.github.io
+npx --yes github:enslaver/harness-remote-plus --cors https://giuliastro.github.io
 ```
 
 `--cors` is needed only for browser/PWA access from that origin. Desktop and Android do not need it.
@@ -140,7 +140,7 @@ npx --yes github:giuliastro/harness-remote --cors https://giuliastro.github.io
 Usually unnecessary:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --backend codex
+npx --yes github:enslaver/harness-remote-plus --backend codex
 ```
 
 On a multi-agent Machine gateway this selects the internal ACP compatibility default; it does not hide the other detected harnesses from the client.
@@ -158,12 +158,12 @@ npm run dev
 Start the gateway with the exact browser origin allowed:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --cors http://localhost:5173
+npx --yes github:enslaver/harness-remote-plus --cors http://localhost:5173
 ```
 
 Then open the URL printed by Vite, normally `http://localhost:5173`.
 
-The hosted web client is:
+The upstream project's hosted web client (built from upstream, so without this fork's additions; this fork publishes no hosted copy) is:
 
 ```text
 https://giuliastro.github.io/harness-remote/
@@ -172,7 +172,7 @@ https://giuliastro.github.io/harness-remote/
 For it, use:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --cors https://giuliastro.github.io
+npx --yes github:enslaver/harness-remote-plus --cors https://giuliastro.github.io
 ```
 
 The gateway deliberately does not pretend to host the web UI itself; it prints connection information for the client.
@@ -205,14 +205,14 @@ With a single detected harness, the launcher can preserve the compatible single-
 If you explicitly need the legacy single-backend path:
 
 ```bash
-npx --yes github:giuliastro/harness-remote --single --backend codex
+npx --yes github:enslaver/harness-remote-plus --single --backend codex
 ```
 
 That is an advanced compatibility option, not the recommended onboarding path.
 
 ## Security
 
-Use Harness Remote over a trusted LAN or VPN.
+Use Harness Remote Plus over a trusted LAN or VPN.
 
 Do **not** expose the gateway directly to the public internet.
 

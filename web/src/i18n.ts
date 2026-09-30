@@ -486,8 +486,8 @@ type TranslationKey =
   | 'sf.loadingIntoController'
 const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>> = {
   en: {
-    'app.title': 'Harness Remote',
-    'notification.title': 'Harness Remote',
+    'app.title': 'Harness Remote Plus',
+    'notification.title': 'Harness Remote Plus',
     'notification.body': 'Agent completed a task',
     'notification.overlayDescription': 'Agent completed a task',
     'app.jumpToTop': 'Jump to top',
@@ -970,8 +970,8 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.loadingIntoController': 'Loading Session…',
   },
   it: {
-    'app.title': 'Harness Remote',
-    'notification.title': 'Harness Remote',
+    'app.title': 'Harness Remote Plus',
+    'notification.title': 'Harness Remote Plus',
     'notification.body': 'Agente ha completato un’attività',
     'notification.overlayDescription': 'Attività agente completata',
     'app.jumpToTop': 'Vai in alto',
@@ -1454,11 +1454,11 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.loadingIntoController': 'Caricamento della sessione…',
   },
   'zh-TW': {
-    'app.title': 'Harness Remote',
+    'app.title': 'Harness Remote Plus',
     'app.jumpToTop': '跳到頂部',
     'app.jumpToBottom': '跳到底部',
     'nav.settings': '設定',
-    'notification.title': 'Harness Remote',
+    'notification.title': 'Harness Remote Plus',
     'notification.body': '代理程式已完成工作',
     'notification.overlayDescription': '代理程式工作已完成',
     'nav.sessions': '工作階段',
@@ -1938,11 +1938,11 @@ const translations: Record<LanguageCode, Partial<Record<TranslationKey, string>>
     'sf.loadingIntoController': '正在載入工作階段…',
   },
   'zh-CN': {
-    'app.title': 'Harness Remote',
+    'app.title': 'Harness Remote Plus',
     'app.jumpToTop': '跳到顶部',
     'app.jumpToBottom': '跳到底部',
     'nav.settings': '设置',
-    'notification.title': 'Harness Remote',
+    'notification.title': 'Harness Remote Plus',
     'notification.body': '代理已完成任务',
     'notification.overlayDescription': '代理任务已完成',
     'nav.sessions': '会话',

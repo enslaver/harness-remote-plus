@@ -326,7 +326,7 @@ try {
     return { sizes: link.getAttribute("sizes"), width: image.naturalWidth, height: image.naturalHeight, title: document.querySelector('meta[name="apple-mobile-web-app-title"]')?.content }
   })
   check("home screen: a 180x180 apple-touch-icon that actually loads", icon.width === 180 && icon.height === 180 && icon.sizes === "180x180", JSON.stringify(icon))
-  check("home screen: has its own title", icon.title === "Harness Remote")
+  check("home screen: has its own title", icon.title === "Harness Remote Plus")
 
   await context.close()
 

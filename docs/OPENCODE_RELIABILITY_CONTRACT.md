@@ -1,6 +1,6 @@
 # OpenCode reliability contract
 
-This document is a non-regression contract for Harness Remote's native OpenCode Session path.
+This document is a non-regression contract for Harness Remote Plus's native OpenCode Session path.
 
 OpenCode has had several independent lifecycle failure modes that can look similar in the UI: a reply can be persisted without the final live event, a transient provider/interruption envelope can recover later, a terminal provider failure can arrive while Session status is incomplete, a silent accepted turn can produce no assistant signal, and a permission/question can intentionally leave the harness waiting for the user. Fixing one of those cases must never weaken another.
 
@@ -12,17 +12,17 @@ The following are release-blocking invariants for OpenCode.
 2. **Persisted assistant output wins.** If the final assistant output is durable in the native transcript, the already-mounted Session must eventually show it even when the final live event is lost or `/session/status` is unavailable.
 3. **No navigation recovery requirement.** Leaving a Session and opening it again may refresh state, but it must never be required to reveal a durable reply or settle Working/Activity.
 4. **Transient interruption is not terminal.** Intermediate tool/error envelopes or short idle edges must not become a permanent red `Response interrupted` when OpenCode continues the same turn.
-5. **Real terminal interruption remains visible.** If OpenCode truly stops without a final answer, Harness Remote must not fabricate success or hide the interruption.
+5. **Real terminal interruption remains visible.** If OpenCode truly stops without a final answer, Harness Remote Plus must not fabricate success or hide the interruption.
 6. **Provider failures settle without getting stuck Working.** Durable terminal errors remain visible and the mounted Session converges without navigation.
 7. **Accepted-but-silent turns fail visibly.** A prompt that OpenCode accepted but that produces neither assistant output nor usable lifecycle evidence must not spin forever.
 8. **Pending authorization/input is a waiting state, not a terminal state.** `permission.asked` / `question.asked` can refresh request detail and transcript, but cannot by themselves terminalize the turn or create `Response interrupted`.
 9. **Attention is authoritative while a request is unresolved.** Opening, selecting or rereading a Session cannot consume a pending permission/question.
-10. **Permission replies are fail-closed.** `Deny` maps exactly to OpenCode `reject`; `Allow once` maps to `once`; `Always allow` maps to `always`. The native reply must succeed before Harness Remote records observational approval metadata or treats the request as resolved.
+10. **Permission replies are fail-closed.** `Deny` maps exactly to OpenCode `reject`; `Allow once` maps to `once`; `Always allow` maps to `always`. The native reply must succeed before Harness Remote Plus records observational approval metadata or treats the request as resolved.
 11. **Failed permission replies stay visible.** A failed reply POST must not optimistically filter/remove the request or clear Attention locally.
 12. **Permission resolution converges in place.** After OpenCode acknowledges a decision, the mounted Session must refresh durable transcript/lifecycle state without reload or navigation.
 13. **Foreground recovery is read/reconcile only.** Returning from background may reread durable state, but must never resend prompts or permission decisions.
-14. **OpenCode authority stays native.** Harness Remote does not invent a second permission engine, transcript, or Session lifecycle.
-15. **Retry detail remains native and visible.** A streamed OpenCode `retry` keeps its provider message and retry metadata; Harness Remote must not replace useful provider detail with a generic waiting state.
+14. **OpenCode authority stays native.** Harness Remote Plus does not invent a second permission engine, transcript, or Session lifecycle.
+15. **Retry detail remains native and visible.** A streamed OpenCode `retry` keeps its provider message and retry metadata; Harness Remote Plus must not replace useful provider detail with a generic waiting state.
 16. **Live error authority is bounded and retractable.** A streamed `session.error` may bridge persistence lag across navigation, but a real later `busy`/`retry` edge or durable successful assistant completion must retire it. Reopening a Session alone must not erase a true error.
 17. **Rail lifecycle is agent-routed and isolated.** A machine-level stream may belong to another primary harness. OpenCode rail lifecycle must therefore come from one persistent routed OpenCode stream per agent, while selected-detail streams cannot own shared rail state and ACP backends cannot inherit OpenCode error semantics.
 18. **Attention settlement fallback is OpenCode-only.** Permission/question acknowledgement keeps the pre-existing immediate resolution reconcile for every backend. Only OpenCode receives one additional bounded trailing reconcile, because its native ACK can precede the resumed turn's durable final output and the resolution event can be lost. Codex/Claude/OMP/PI ACP resolution semantics must not inherit that delayed second pass.
@@ -66,11 +66,11 @@ A future refactor must preserve the behavior represented by those regressions ev
 
 ## Native permission boundary and upstream OpenCode behavior
 
-Harness Remote can only deny a native OpenCode permission request that OpenCode actually emits before the protected action executes.
+Harness Remote Plus can only deny a native OpenCode permission request that OpenCode actually emits before the protected action executes.
 
-A known upstream OpenCode issue (`anomalyco/opencode#32628`) describes shell redirect targets such as `echo value > /outside/file` bypassing the `external_directory` check. In that situation the shell side effect can occur before any permission request reaches Harness Remote; a later permission for a different operation cannot retroactively undo it.
+A known upstream OpenCode issue (`anomalyco/opencode#32628`) describes shell redirect targets such as `echo value > /outside/file` bypassing the `external_directory` check. In that situation the shell side effect can occur before any permission request reaches Harness Remote Plus; a later permission for a different operation cannot retroactively undo it.
 
-Do not "fix" this in Harness Remote by fabricating a second sandbox/authorization layer or by claiming that a later Deny blocked an earlier un-gated native action. Track upstream behavior separately while keeping Harness Remote's own permission reply path strictly fail-closed and observable.
+Do not "fix" this in Harness Remote Plus by fabricating a second sandbox/authorization layer or by claiming that a later Deny blocked an earlier un-gated native action. Track upstream behavior separately while keeping Harness Remote Plus's own permission reply path strictly fail-closed and observable.
 
 ## Merge/release rule
 

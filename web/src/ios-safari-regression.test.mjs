@@ -22,7 +22,7 @@ assert.match(viewport, /interactive-widget=resizes-content/, "Android's keyboard
 
 // --- Home-screen metadata ------------------------------------------------------------------------------
 assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon\.png"/)
-assert.match(html, /<meta name="apple-mobile-web-app-title" content="Harness Remote"/)
+assert.match(html, /<meta name="apple-mobile-web-app-title" content="Harness Remote Plus"/)
 assert.match(html, /<meta name="apple-mobile-web-app-capable" content="yes"/)
 
 const icon = readFileSync(new URL("../public/apple-touch-icon.png", import.meta.url))

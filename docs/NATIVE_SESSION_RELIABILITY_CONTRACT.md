@@ -1,6 +1,6 @@
 # Native Session reliability contract
 
-Harness Remote treats each coding harness as the authority for its own Native Sessions. The UI, daemon, transcript cache and live-event streams are projections of that native truth; none of them may become a competing session authority.
+Harness Remote Plus treats each coding harness as the authority for its own Native Sessions. The UI, daemon, transcript cache and live-event streams are projections of that native truth; none of them may become a competing session authority.
 
 This contract generalizes the OpenCode reliability contract to the shared Session-first surface without erasing provider-specific behavior. OpenCode, Codex, Claude Code, OMP and PI may expose different lifecycle and persistence mechanisms, but the user-visible Native Session invariants below are common release requirements.
 
