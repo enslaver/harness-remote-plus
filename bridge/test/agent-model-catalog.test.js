@@ -335,3 +335,12 @@ test("provider catalog keeps one exact selection per model variant and skips dis
   assert.equal(result.find((model) => model.modelID === "free")?.isFree, true)
   assert.equal(result.find((model) => model.modelID === "free")?.inputCost, 0)
 })
+
+test("an OpenCode model whose provider the inventory never listed is left for OpenCode to resolve", async () => {
+  const { AcpAgentModelCatalog } = await import("../src/agent-model-catalog.js")
+  const catalog = Object.create(AcpAgentModelCatalog.prototype)
+  const result = { models: [{ providerID: "openai", modelID: "gpt-5", providerName: "OpenAI" }] }
+  const custom = { providerID: "amazon-bedrock", modelID: "us.anthropic.claude-sonnet-4-5-20250929-v1:0" }
+  assert.equal(catalog.resolveResult(result, custom), custom)
+  assert.throws(() => catalog.resolveResult(result, { providerID: "openai", modelID: "gone" }), (error) => error.code === "model_unavailable")
+})

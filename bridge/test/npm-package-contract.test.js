@@ -12,11 +12,13 @@ async function readJSON(url) {
 test("root npm package stays publishable and version-aligned", async () => {
   const [root, web] = await Promise.all([readJSON(rootURL), readJSON(webURL)])
 
-  assert.equal(root.name, "harness-remote")
+  assert.equal(root.name, "harness-remote-plus")
   assert.equal(root.version, web.version, "npm CLI version must match the shipped app version")
   assert.notEqual(root.private, true, "root CLI package must remain publishable")
   assert.equal(root.type, "module")
-  assert.equal(root.bin?.["harness-remote"], "bridge/src/launcher.js")
+  assert.equal(root.bin?.["harness-remote-plus"], "bridge/src/launcher.js")
+  assert.equal(root.bin?.["harness-remote"], "bridge/src/launcher.js", "the upstream command name keeps working")
+  assert.equal(root.bin?.["harness-remote-plus-daemon"], "bridge/src/daemon-bin.js")
   assert.equal(root.bin?.["harness-remote-daemon"], "bridge/src/daemon-bin.js")
   assert.equal(root.publishConfig?.access, "public")
   assert.ok(root.files?.includes("bridge/src"), "published package must include the runtime")

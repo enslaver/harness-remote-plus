@@ -42,6 +42,19 @@ const PATTERNS = [
   [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "[redacted-jwt]"]
 ]
 
+/**
+ * The values of the environment variables that carry provider credentials (ANTHROPIC_AUTH_TOKEN,
+ * AWS_SECRET_ACCESS_KEY, AWS_BEARER_TOKEN_BEDROCK, OPENAI_API_KEY, a gateway's custom key...). The
+ * pattern redactor only recognises a secret by its name or its well-known prefix, so a bare value
+ * echoed by a failing adapter would otherwise ship to the hub verbatim.
+ */
+export function providerSecretsFromEnvironment(environment = process.env) {
+  const named = /(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)/i
+  return Object.entries(environment)
+    .filter(([name, value]) => typeof value === "string" && value.length >= 8 && (named.test(name) || /^AWS_(?:SESSION_TOKEN|BEARER)/i.test(name)))
+    .map(([, value]) => value)
+}
+
 /** `secrets` are literal values (this gateway's password, the hub tokens) that must never be shipped verbatim. */
 export function createRedactor(secrets = []) {
   const literals = secrets.filter((secret) => typeof secret === "string" && secret.length >= 6)

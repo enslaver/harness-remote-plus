@@ -99,3 +99,40 @@ test("a real POSIX login shell emits a usable exported PATH", { skip: process.pl
   assert.ok(discovered.length > 0)
   assert.equal(discovered.includes("\n"), false)
 })
+
+test("provider and endpoint settings exported in the login shell reach the desktop runtime", async () => {
+  const { parseLoginShellProviderEnvironment } = await import("../dist-electron/electron/shell-path.js")
+  const output = [
+    "noise before",
+    "__HARNESS_REMOTE_PATH_START__",
+    "PATH=/opt/homebrew/bin:/usr/bin",
+    "CLAUDE_CODE_USE_BEDROCK=1",
+    "AWS_PROFILE=work",
+    "ANTHROPIC_BASE_URL=https://gateway.example",
+    "ANTHROPIC_AUTH_TOKEN=gw-token",
+    "OPENAI_BASE_URL=http://localhost:11434/v1",
+    "CLAUDE_CODE_SESSION_ID=parent",
+    "GITHUB_TOKEN=must-not-import",
+    "OPENAI_EMPTY=",
+    "AWS_CA_BUNDLE=-----BEGIN CERTIFICATE-----",
+    "MIIB-continuation-line",
+    "-----END CERTIFICATE-----",
+    "HOME=/Users/example",
+    "__HARNESS_REMOTE_PATH_END__"
+  ].join("\n")
+  assert.deepEqual(parseLoginShellProviderEnvironment(output), {
+    CLAUDE_CODE_USE_BEDROCK: "1",
+    AWS_PROFILE: "work",
+    ANTHROPIC_BASE_URL: "https://gateway.example",
+    ANTHROPIC_AUTH_TOKEN: "gw-token",
+    OPENAI_BASE_URL: "http://localhost:11434/v1"
+  })
+
+  const resolved = await resolveDesktopRuntimeEnvironment({ PATH: "/usr/bin", AWS_PROFILE: "from-launch" }, {
+    platform: "darwin",
+    delimiter: ":",
+    readShellPath: async () => "/opt/bin",
+    readShellEnvironment: async () => ({ AWS_PROFILE: "from-shell", AWS_REGION: "us-east-1" })
+  })
+  assert.deepEqual(resolved, { PATH: "/opt/bin:/usr/bin", AWS_PROFILE: "from-launch", AWS_REGION: "us-east-1" })
+})

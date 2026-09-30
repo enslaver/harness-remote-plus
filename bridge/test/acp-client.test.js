@@ -316,3 +316,43 @@ test("rejects an in-flight request when ACP exits", async () => {
   await client.start()
   await assert.rejects(client.request("session/hang", {}), /ACP adapter exited \(1\)/)
 })
+
+test("a harness with no login (Bedrock, Vertex, a gateway, a custom provider) still starts", async () => {
+  // The adapter offers only login-shaped methods and rejects them all when there is no login: the
+  // endpoint and credentials come from the environment, and a real problem is reported by session/new.
+  const attempts = []
+  const client = new AcpClient({
+    spawnProcess: fakeSpawn((child, request) => {
+      if (request.method === "authenticate") {
+        attempts.push(request.params.methodId)
+        child.respond({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "Not logged in" } })
+      } else {
+        respondToHandshake(child, request, [{ id: "claude-login", type: "terminal" }, { id: "api-key", type: "env_var" }])
+      }
+    })
+  })
+  await client.start()
+  assert.deepEqual(attempts, ["claude-login", "api-key"], "every method is tried, login-shaped ones first")
+  assert.match(client.authenticationWarning, /Not logged in/)
+  client.close()
+})
+
+test("moves on to the next auth method when one is refused, and stops at the first that works", async () => {
+  const attempts = []
+  const client = new AcpClient({
+    preferredAuthMethod: "chat-gpt",
+    spawnProcess: fakeSpawn((child, request) => {
+      if (request.method === "authenticate") {
+        attempts.push(request.params.methodId)
+        if (request.params.methodId === "chat-gpt") child.respond({ jsonrpc: "2.0", id: request.id, error: { code: -32000, message: "no chatgpt login" } })
+        else child.respond({ jsonrpc: "2.0", id: request.id, result: {} })
+      } else {
+        respondToHandshake(child, request, [{ id: "api-key", type: "env_var" }, { id: "chat-gpt" }])
+      }
+    })
+  })
+  await client.start()
+  assert.deepEqual(attempts, ["chat-gpt", "api-key"])
+  assert.equal(client.authenticationWarning, undefined)
+  client.close()
+})

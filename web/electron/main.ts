@@ -349,7 +349,11 @@ function installIPC(): void {
 
 async function start(): Promise<void> {
   app.setAppUserModelId("com.harnessremote.desktop")
-  app.setName("Harness Remote")
+  app.setName("Harness Remote Plus")
+  // The product was renamed, but the profile registry, window state and embedded daemon state live
+  // under the directory Electron derived from the original name. Keep using it so an upgrade does
+  // not look like a fresh install with no machines.
+  app.setPath("userData", join(app.getPath("appData"), "Harness Remote"))
   registry = new ProfileRegistry(profileFile())
   await registry.load()
   eventTransport = new DesktopEventTransport(registry, IPC_CHANNELS)

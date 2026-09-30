@@ -172,13 +172,33 @@ export class AcpClient extends EventEmitter {
       // Codex's adapter lists `api-key` first too, but its ChatGPT login method is what reads a
       // `codex login` from disk, so a profile may name the method its harness expects.
       const authMethods = Array.isArray(initialized.authMethods) ? initialized.authMethods : []
-      let authMethod = this.#preferredAuthMethod
-        ? authMethods.find((method) => method?.id === this.#preferredAuthMethod)
-        : undefined
-      authMethod ??= authMethods.find((method) => method?.id === "agent")
-        ?? authMethods.find((method) => method?.id && method.type !== "env_var")
-        ?? authMethods.find((method) => method?.id)
-      if (authMethod) await this.request("authenticate", { methodId: authMethod.id }, remaining("authenticate"))
+      const candidates = []
+      const consider = (method) => { if (method?.id && !candidates.includes(method)) candidates.push(method) }
+      if (this.#preferredAuthMethod) consider(authMethods.find((method) => method?.id === this.#preferredAuthMethod))
+      consider(authMethods.find((method) => method?.id === "agent"))
+      authMethods.filter((method) => method?.id && method.type !== "env_var").forEach(consider)
+      authMethods.forEach(consider)
+      // A harness pointed at Bedrock, Vertex, a gateway or a custom model provider often has no login
+      // at all: the adapter reads its endpoint and credentials from the environment or its own config
+      // when a Session starts. `authenticate` is then either unnecessary or fails for the method that
+      // suits a login. Try each method in turn, and if none is accepted carry on rather than refuse to
+      // start - `session/new` and `session/prompt` report a real authentication problem with the
+      // adapter's own error, which is far more useful than a handshake that never finishes.
+      let lastAuthError
+      let authenticated = candidates.length === 0
+      for (const method of candidates) {
+        const budget = remaining("authenticate")
+        try {
+          await this.request("authenticate", { methodId: method.id }, budget)
+          authenticated = true
+          break
+        } catch (error) {
+          // A dead or unresponsive adapter is a failed start; only a refusal moves on to the next method.
+          if (!this.#child || this.#child.killed || /timed out/i.test(error?.message ?? "")) throw error
+          lastAuthError = error
+        }
+      }
+      if (!authenticated) this.authenticationWarning = lastAuthError?.message ?? "authentication was not accepted"
     } catch (error) {
       this.close()
       throw error

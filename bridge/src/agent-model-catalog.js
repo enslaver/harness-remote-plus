@@ -6,7 +6,10 @@ import path from "node:path"
 export const MODEL_CATALOG_TIMEOUT_MS = 30_000
 export const ACP_MODEL_CATALOG_TIMEOUT_MS = 90_000
 export const HTTP_MODEL_CATALOG_TTL_MS = 30_000
+// Every model costs one `session/set_config_option` round trip, and a Bedrock, OpenRouter or gateway
+// account can advertise hundreds. The budget grows with the catalog, up to the catalog deadline.
 const ACP_VARIANT_PROBE_BUDGET_MS = 10_000
+const ACP_VARIANT_PROBE_PER_MODEL_MS = 250
 const ACP_VARIANT_REQUEST_TIMEOUT_MS = 2_000
 
 function withTimeout(promise, timeoutMs, label) {
@@ -198,6 +201,10 @@ class CachedCatalog {
   resolveResult(result, model) {
     if (!model) return null
     const candidate = result.models.find((item) => sameModel(item, model))
+    // A provider this inventory has never heard of is not "a model that went away": it is one the
+    // harness resolves itself (a provider defined in a project's own config, or by environment
+    // variables). Only reject a model whose provider is known and does not offer it.
+    if (!candidate && !result.models.some((item) => item.providerID === model.providerID)) return model
     if (!candidate) {
       const suffix = model.variant ? ` (${model.variant})` : ""
       const error = new Error(`Selected model is no longer available: ${model.providerID}/${model.modelID}${suffix}`)
@@ -324,7 +331,8 @@ export class AcpAgentModelCatalog extends CachedCatalog {
       if (right?.value === originalModel) return 1
       return 0
     })
-    const probeDeadline = Math.min(catalogDeadline, Date.now() + ACP_VARIANT_PROBE_BUDGET_MS)
+    const probeBudget = Math.max(ACP_VARIANT_PROBE_BUDGET_MS, ordered.length * ACP_VARIANT_PROBE_PER_MODEL_MS)
+    const probeDeadline = Math.min(catalogDeadline, Date.now() + probeBudget)
     const variants = []
     let currentModel = originalModel
     this.variantProbe = { total: ordered.length, completed: 0, incomplete: false, lastError: null }
@@ -470,7 +478,7 @@ export class HttpAgentModelCatalog extends CachedCatalog {
       if (response.status === 404 || response.status === 405) continue
       if (!response.ok) throw new Error(`Refreshing ${this.agentID} models from ${pathname} failed with HTTP ${response.status}`)
       const models = modelsFromRuntimeProvidersResponse(await response.json())
-      if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any connected runtime models`)
+      if (!models.length) throw new Error(`Agent ${this.agentID} did not advertise any connected runtime models. Run "opencode auth login", set the provider's environment variables (for example AWS_PROFILE and AWS_REGION for Bedrock), or define the provider in opencode.json`)
       this.source = `opencode-runtime:${pathname}`
       return this.remember(models)
     }

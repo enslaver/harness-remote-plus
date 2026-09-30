@@ -5,14 +5,62 @@ import { delimiter as platformPathDelimiter } from "node:path"
 const PATH_START_MARKER = "__HARNESS_REMOTE_PATH_START__"
 const PATH_END_MARKER = "__HARNESS_REMOTE_PATH_END__"
 const DEFAULT_SHELL_TIMEOUT_MS = 2_000
-const MAX_CAPTURED_STDOUT = 32_768
+const MAX_CAPTURED_STDOUT = 262_144
 
-// Keep this command static. The shell is used only to materialize its exported PATH; no user or
-// repository-controlled value is interpolated into the command string. Reading PATH through env
+// Keep this command static. The shell is used only to materialize its exported environment; no user
+// or repository-controlled value is interpolated into the command string. Reading PATH through env
 // also avoids shell-specific list semantics (for example Fish exposes PATH internally as a list).
-const PRINT_PATH_COMMAND = `printf '${PATH_START_MARKER}\\n'; /usr/bin/env | /usr/bin/grep '^PATH='; printf '${PATH_END_MARKER}\\n'`
+// Everything that is exported is read once, then PATH and the provider settings are picked out of it
+// here, so nothing else the user has exported is ever kept.
+const PRINT_ENVIRONMENT_COMMAND = `printf '${PATH_START_MARKER}\\n'; /usr/bin/env; printf '${PATH_END_MARKER}\\n'`
+
+// A desktop app launched from the Dock or a menu does not inherit the variables a user exports in
+// their shell profile, and those variables are how Claude Code is pointed at Bedrock, Vertex or a
+// gateway, Codex at an OpenAI-compatible endpoint, and OpenCode at Bedrock or Azure. This is a
+// deliberate allow-list of provider and network settings, not the whole environment. Session
+// identity variables (CLAUDE_CODE_SESSION*, ...) are excluded on purpose.
+const PROVIDER_ENVIRONMENT_NAME = new RegExp([
+  "^ANTHROPIC_",
+  "^CLAUDE_CODE_(?:USE|SKIP)_",
+  "^CLAUDE_CONFIG_DIR$",
+  "^AWS_",
+  "^CLOUD_ML_REGION$",
+  "^GOOGLE_(?:APPLICATION_CREDENTIALS|CLOUD_PROJECT|CLOUD_LOCATION|GENAI_USE_VERTEXAI)$",
+  "^VERTEX_",
+  "^OPENAI_",
+  "^CODEX_",
+  "^AZURE_",
+  "^OPENROUTER_",
+  "^OPENCODE_(?!SERVER_)",
+  "^NODE_EXTRA_CA_CERTS$",
+  "^(?:HTTPS?|NO|ALL)_PROXY$"
+].join("|"), "i")
 
 type ShellPathReader = (environment: NodeJS.ProcessEnv) => Promise<string | undefined>
+type ShellEnvironmentReader = (environment: NodeJS.ProcessEnv) => Promise<Record<string, string>>
+
+/**
+ * The provider settings in a login shell's `env` output. A value that spans several lines (a
+ * certificate, say) is dropped rather than kept truncated: an entry counts only when the next line
+ * starts another variable or closes the block.
+ */
+export function parseLoginShellProviderEnvironment(output: string): Record<string, string> {
+  const start = output.lastIndexOf(PATH_START_MARKER)
+  if (start < 0) return {}
+  const valueStart = start + PATH_START_MARKER.length
+  const end = output.indexOf(PATH_END_MARKER, valueStart)
+  if (end < 0) return {}
+  const lines = output.slice(valueStart, end).split(/\r?\n/)
+  const result: Record<string, string> = {}
+  const startsVariable = (line: string | undefined) => line === undefined || line === "" || /^[A-Za-z_][A-Za-z0-9_]*=/.test(line)
+  lines.forEach((line, index) => {
+    const match = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line)
+    if (!match || !PROVIDER_ENVIRONMENT_NAME.test(match[1]) || !match[2]) return
+    if (!startsVariable(lines[index + 1])) return
+    result[match[1]] = match[2]
+  })
+  return result
+}
 
 export function parseLoginShellPathOutput(output: string): string | undefined {
   const start = output.lastIndexOf(PATH_START_MARKER)
@@ -60,6 +108,15 @@ export async function readLoginShellPath(
   environment: NodeJS.ProcessEnv = process.env,
   options: { platform?: NodeJS.Platform; timeoutMs?: number; shell?: string } = {}
 ): Promise<string | undefined> {
+  const output = await readLoginShellOutput(environment, options)
+  return output === undefined ? undefined : parseLoginShellPathOutput(output)
+}
+
+/** The raw, marker-delimited `env` output of the user's login shell. */
+export async function readLoginShellOutput(
+  environment: NodeJS.ProcessEnv = process.env,
+  options: { platform?: NodeJS.Platform; timeoutMs?: number; shell?: string } = {}
+): Promise<string | undefined> {
   const platform = options.platform ?? process.platform
   if (platform === "win32") return undefined
   const shell = options.shell || loginShell(environment, platform)
@@ -81,7 +138,7 @@ export async function readLoginShellPath(
     }
 
     try {
-      child = spawn(shell, ["-ilc", PRINT_PATH_COMMAND], {
+      child = spawn(shell, ["-ilc", PRINT_ENVIRONMENT_COMMAND], {
         env: environment,
         stdio: ["ignore", "pipe", "ignore"],
         windowsHide: true
@@ -99,7 +156,7 @@ export async function readLoginShellPath(
       stdout = `${stdout}${chunk.toString()}`.slice(-MAX_CAPTURED_STDOUT)
     })
     child.once("error", () => finish())
-    child.once("exit", (code) => finish(code === 0 ? parseLoginShellPathOutput(stdout) : undefined))
+    child.once("exit", (code) => finish(code === 0 ? stdout : undefined))
   })
 }
 
@@ -109,6 +166,7 @@ export async function resolveDesktopRuntimeEnvironment(
     platform?: NodeJS.Platform
     delimiter?: string
     readShellPath?: ShellPathReader
+    readShellEnvironment?: ShellEnvironmentReader
   } = {}
 ): Promise<NodeJS.ProcessEnv> {
   const platform = options.platform ?? process.platform
@@ -116,8 +174,19 @@ export async function resolveDesktopRuntimeEnvironment(
   if (platform === "win32") return resolved
 
   let shellPath: string | undefined
+  let shellProvider: Record<string, string> = {}
   try {
-    shellPath = await (options.readShellPath ?? ((env) => readLoginShellPath(env, { platform })))(environment)
+    if (options.readShellPath || options.readShellEnvironment) {
+      shellPath = await (options.readShellPath ?? (async () => undefined))(environment)
+      shellProvider = await (options.readShellEnvironment ?? (async () => ({})))(environment)
+    } else {
+      // One login shell answers both questions; starting a second would double the startup cost.
+      const output = await readLoginShellOutput(environment, { platform })
+      if (output !== undefined) {
+        shellPath = parseLoginShellPathOutput(output)
+        shellProvider = parseLoginShellProviderEnvironment(output)
+      }
+    }
   } catch {
     // Discovery is a reliability enhancement, never a startup dependency. The inherited PATH remains
     // usable for terminals, CI and machines whose shell startup is slow or intentionally unusual.
@@ -125,5 +194,9 @@ export async function resolveDesktopRuntimeEnvironment(
   }
   const mergedPath = mergeExecutablePath(shellPath, environment.PATH, options.delimiter)
   if (mergedPath) resolved.PATH = mergedPath
+  // What the app was launched with wins; the shell only fills in what a GUI launch left out.
+  for (const [name, value] of Object.entries(shellProvider)) {
+    if (resolved[name] === undefined) resolved[name] = value
+  }
   return resolved
 }

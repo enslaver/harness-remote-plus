@@ -204,3 +204,18 @@ test("reports no history rather than failing when a rollout is absent", async ()
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test("a model behind a custom Codex provider is split the way the model catalog splits it", async () => {
+  // OpenRouter, LiteLLM and gateways record ids like `anthropic/claude-sonnet`. The ACP catalog reads
+  // that as provider `anthropic`, so the restored model must match it or the picker shows no selection.
+  const root = await writeRollout([
+    { timestamp: "2026-08-07T09:28:49.000Z", type: "turn_context", payload: { model: "openrouter/anthropic/claude-sonnet", effort: "low" } },
+    { timestamp: "2026-08-07T09:28:51.000Z", type: "event_msg", payload: { type: "user_message", message: "Hi" } }
+  ])
+  try {
+    const page = await createCodexHistoryLoader(root).page(sessionID, { limit: 5 })
+    assert.deepEqual(page.model, { providerID: "openrouter", modelID: "anthropic/claude-sonnet", variant: "low" })
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})

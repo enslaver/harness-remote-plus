@@ -98,7 +98,10 @@ export const HARNESS_PROFILES = {
     label: "Claude Code",
     // Uses the official ACP adapter for the Claude Agent SDK. The adapter speaks ACP JSON-RPC
     // over stdio and wraps @anthropic-ai/claude-agent-sdk under the hood. The user must have
-    // run `claude login` or set ANTHROPIC_API_KEY before starting the bridge.
+    // run `claude login`, or configure another provider before starting the bridge:
+    // ANTHROPIC_API_KEY, Bedrock (CLAUDE_CODE_USE_BEDROCK + AWS_*), Vertex (CLAUDE_CODE_USE_VERTEX), or an
+    // Anthropic-compatible gateway (ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN). The adapter inherits the
+    // bridge's environment, and a handshake with no usable login is not fatal (see AcpClient).
     // Requires Node 22+ (same as the PI adapter it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
@@ -131,7 +134,8 @@ export const HARNESS_PROFILES = {
     label: "Codex CLI",
     // Uses the official ACP adapter for the OpenAI Codex CLI. The adapter speaks ACP JSON-RPC
     // over stdio and embeds @openai/codex, so no separate Codex installation is needed. The
-    // user must have run `codex login` (ChatGPT account) or set an OpenAI API key first.
+    // user must have run `codex login` (ChatGPT account), set an OpenAI API key, or defined a
+    // `model_providers` entry in ~/.codex/config.toml for an OpenAI-compatible endpoint.
     // Requires Node 22+ (same as the PI and Claude adapters it mirrors).
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package

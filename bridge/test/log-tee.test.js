@@ -219,3 +219,13 @@ test("redaction leaves ordinary log lines alone", () => {
     assert.equal(redact(line), line)
   }
 })
+
+test("provider credentials in the environment are redacted even when echoed bare", async () => {
+  const { providerSecretsFromEnvironment } = await import("../src/log-tee.js")
+  const secrets = providerSecretsFromEnvironment({
+    ANTHROPIC_AUTH_TOKEN: "gateway-token-value", AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG", AWS_REGION: "us-east-1", PATH: "/usr/bin", SHORT_KEY: "abc"
+  })
+  assert.deepEqual(secrets.sort(), ["gateway-token-value", "wJalrXUtnFEMI/K7MDENG"])
+  const redact = createRedactor(secrets)
+  assert.equal(redact("401 from gateway with gateway-token-value"), "401 from gateway with [redacted]")
+})

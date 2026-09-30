@@ -81,7 +81,14 @@ function modelFromTurnContext(record) {
   if (!modelID) return undefined
   const effortValue = record.payload?.effort ?? record.payload?.collaboration_mode?.reasoning_effort
   const variant = typeof effortValue === "string" && effortValue.trim() ? effortValue.trim() : undefined
-  return { providerID: "codex", modelID, ...(variant ? { variant } : {}) }
+  // Behind a custom model provider (OpenRouter, LiteLLM, a gateway) Codex records ids such as
+  // `anthropic/claude-sonnet`. The ACP catalog splits those at the first slash, so this must too or
+  // the restored Session's model matches no row in the picker.
+  const separator = modelID.indexOf("/")
+  const split = separator > 0
+    ? { providerID: modelID.slice(0, separator), modelID: modelID.slice(separator + 1) }
+    : { providerID: "codex", modelID }
+  return { ...split, ...(variant ? { variant } : {}) }
 }
 
 async function* forwardLines(file) {
@@ -163,7 +170,7 @@ async function readCodexPage(file, sessionID, { limit = 100, before } = {}) {
  * records also hold instruction blocks Codex feeds the model, AGENTS.md, the plugin list and desktop
  * app context under the `user` role, which would surface as the user's own turns.
  */
-export function createCodexHistoryLoader(sessionRoot = path.join(homedir(), ".codex", "sessions")) {
+export function createCodexHistoryLoader(sessionRoot = path.join(process.env.CODEX_HOME || path.join(homedir(), ".codex"), "sessions")) {
   const sessionFiles = new Map()
 
   async function locateSession(sessionID) {

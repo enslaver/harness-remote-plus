@@ -24,7 +24,10 @@ export const TERMINAL_ACTIVITIES = Object.freeze(["completed", "failed", "stoppe
 
 const SHORT_ID = /^[a-f0-9]{8}$/
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/\-[\]]{0,79}$/
+// Wide enough for what other providers call a model: Bedrock inference-profile ARNs, Vertex's
+// `claude-sonnet-4@20250514`, and a gateway's own names. It is a single argv element, never a shell
+// string, so the one real hazard - a leading `-` read as a flag - is what the anchor rules out.
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@+=,\-[\]]{0,255}$/
 // `bypassPermissions` is deliberately absent: a remote screen must not be able to start an
 // unattended agent with every safety check off.
 export const BACKGROUND_PERMISSION_MODES = Object.freeze(["default", "acceptEdits", "plan", "auto"])
@@ -325,6 +328,8 @@ export function commandNotFound(result) {
   return result.code !== 0 && CMD_NOT_RECOGNIZED.test(`${result.stderr ?? ""}\n${result.stdout ?? ""}`)
 }
 
+const AUTH_FAILURE = /not logged in|please run \/?login|invalid api key|invalid x-api-key|authentication[_ ]error|ExpiredToken|security token.*expired|unable to locate credentials|could not load credentials|credentials? (?:are |is )?(?:missing|not found|expired)|\b40[13]\b.*(?:unauthorized|forbidden)/i
+
 function failureFrom(result, fallbackMessage) {
   if (commandNotFound(result)) {
     return serviceError("claude_not_found", "The `claude` command was not found on this machine. Install Claude Code, or set HARNESS_REMOTE_CLAUDE_COMMAND.", { status: 503 })
@@ -333,6 +338,9 @@ function failureFrom(result, fallbackMessage) {
   if (result.error) return serviceError("claude_failed", result.error.message || fallbackMessage, { status: 502 })
   if (result.timedOut) return serviceError("claude_timeout", `${fallbackMessage} (timed out)`, { status: 504 })
   const detail = stripAnsi(result.stderr || result.stdout || "").trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ").slice(0, 400)
+  // Whatever the provider - a `claude login`, an API key, Bedrock, Vertex, a gateway - the CLI says
+  // when it cannot authenticate. Naming that lets the app say "sign in" instead of "failed".
+  if (AUTH_FAILURE.test(detail)) return serviceError("claude_unauthenticated", detail, { status: 401 })
   return serviceError("claude_failed", detail || fallbackMessage, { status: 502 })
 }
 
