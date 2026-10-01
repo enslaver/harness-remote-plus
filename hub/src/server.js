@@ -4,7 +4,7 @@ import { generateToken, hashToken, safeEqual } from "./crypto.js"
 import { nullSink } from "./events.js"
 import { parseTime } from "./loki.js"
 import {
-  HttpError, Router, bearerToken, clientAddress, isSafeMethod, isSameSiteRequest, publicUrl, readJson, sendError, sendJson
+  HttpError, Router, bearerToken, clientAddress, machineToken, isSafeMethod, isSameSiteRequest, publicUrl, readJson, sendError, sendJson
 } from "./http.js"
 import { bootstrapMachine, publicMachine, publicSession } from "./present.js"
 import { Prober } from "./prober.js"
@@ -69,19 +69,24 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
     return handler(ctx)
   }
 
-  /** Machine routes, authenticated by the per-machine bearer token issued at enrollment. */
-  const machine = (handler) => async (ctx) => {
-    const address = clientAddress(ctx.req, config.trustProxy)
+  /** Resolves the machine a request's token belongs to, or throws; failures share one throttle budget per address. */
+  const authenticateMachine = async (req) => {
+    const address = clientAddress(req, config.trustProxy)
     const wait = machineThrottle.retryAfter(address)
     if (wait) throw new HttpError(429, "too_many_attempts", "Too many failed attempts", { "Retry-After": String(wait) })
-    const token = bearerToken(ctx.req)
+    const token = machineToken(req)
     const row = token ? await store.machineByTokenHash(hashToken(token)) : undefined
     if (!row) {
       machineThrottle.fail(address)
       throw new HttpError(401, "invalid_token", "Unknown or revoked machine token")
     }
-    return handler({ ...ctx, machine: row })
+    return row
   }
+
+  /** Machine routes, authenticated by the per-machine bearer token issued at enrollment. */
+  const machine = (handler) => async (ctx) => handler({ ...ctx, machine: await authenticateMachine(ctx.req) })
+
+  const proxyableMachines = async () => (await store.listMachines()).filter((row) => row.proxy_enabled && row.credentials_enc)
 
   // ---- liveness / readiness -----------------------------------------------------------------
 
@@ -133,7 +138,7 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       sendJson(res, 200, { hub: true, authenticated: false, name: config.name })
       return
     }
-    const rows = (await store.listMachines()).filter((row) => row.proxy_enabled && row.credentials_enc)
+    const rows = await proxyableMachines()
     sendJson(
       res,
       200,
@@ -151,6 +156,14 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
   })
 
   // ---- machine-facing API -------------------------------------------------------------------
+
+  // The fleet as an enrolled client sees it: the same machine list the signed-in web app gets, read with
+  // the per-machine token. Enrolled machines are trusted peers, so they may also open each other through
+  // the proxy (see the dispatch below); revoke a machine's token to cut it off.
+  router.add("GET", "/api/v1/fleet", machine(async ({ res }) => {
+    const rows = await proxyableMachines()
+    sendJson(res, 200, { hub: true, authenticated: true, name: config.name, machines: rows.map((row) => bootstrapMachine(row, presentOptions())) })
+  }))
 
   router.add("POST", "/api/v1/machines/enroll", async ({ req, res }) => {
     const address = clientAddress(req, config.trustProxy)
@@ -381,11 +394,17 @@ export function createHub({ config, store, auth, keys, sink = nullSink, loki, pr
       const proxied = url.pathname.startsWith("/m/") ? parseProxyPath(url.pathname) : null
       if (proxied) {
         const session = adminAuth.authenticate(req)
-        if (!session) throw new HttpError(401, "unauthenticated", "Sign in required")
-        if (!isSafeMethod(req.method ?? "GET") && !isSameSiteRequest(req, config)) {
-          throw new HttpError(403, "cross_site_request", "Cross-site requests are not allowed")
+        if (session) {
+          if (!isSafeMethod(req.method ?? "GET") && !isSameSiteRequest(req, config)) {
+            throw new HttpError(403, "cross_site_request", "Cross-site requests are not allowed")
+          }
+          if (session.refresh) res.setHeader("Set-Cookie", session.refresh)
+        } else if (machineToken(req)) {
+          // A bearer credential is not ambient like a cookie, so there is no cross-site check to make.
+          await authenticateMachine(req)
+        } else {
+          throw new HttpError(401, "unauthenticated", "Sign in required")
         }
-        if (session.refresh) res.setHeader("Set-Cookie", session.refresh)
         await proxy({ req, res, url, ...proxied })
         return
       }

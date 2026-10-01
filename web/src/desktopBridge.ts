@@ -5,6 +5,8 @@ import type {
   DesktopEvent,
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
+  DesktopHubMachine,
+  DesktopHubState,
   DesktopLocalRuntimeState,
   DesktopMenuCommand,
   DesktopMenuTemplate,
@@ -24,6 +26,10 @@ export type DesktopBridgeAPI = {
   request(profileId: string, request: DesktopRequest): Promise<DesktopRequestResult>
   getLocalRuntimeState(): Promise<DesktopLocalRuntimeState>
   retryLocalRuntime(): Promise<DesktopLocalRuntimeState>
+  getHubState(): Promise<DesktopHubState>
+  configureHub(url: string, token: string): Promise<DesktopHubState>
+  clearHub(): Promise<DesktopHubState>
+  openHub(): Promise<boolean>
   subscribeEvents(
     profileId: string,
     options: DesktopEventSubscriptionOptions,
@@ -51,6 +57,7 @@ let synchronizationError: Error | undefined
 let nextRevision = 0
 let hasSynchronized = false
 let localRuntime: DesktopLocalRuntimeState | null = null
+let hubMachines: DesktopHubMachine[] = []
 
 export type DesktopSubscription = { close(): void }
 
@@ -76,6 +83,7 @@ function sameProfile(left: DesktopProfile, right: DesktopProfile): boolean {
     && left.username === right.username
     && left.password === right.password
     && left.agentId === right.agentId
+    && (left.basePath ?? "") === (right.basePath ?? "")
 }
 
 function sameSnapshot(left: DesktopProfile[], right: DesktopProfile[]): boolean {
@@ -201,6 +209,45 @@ export async function retryDesktopLocalRuntime(): Promise<DesktopLocalRuntimeSta
   return rememberLocalRuntimeState(await api.retryLocalRuntime())
 }
 
+function rememberHubState(state: DesktopHubState): DesktopHubState {
+  hubMachines = state.machines
+  return state
+}
+
+export async function desktopHubState(): Promise<DesktopHubState | null> {
+  const api = bridge()
+  return api ? rememberHubState(await api.getHubState()) : null
+}
+
+export async function configureDesktopHub(url: string, token: string): Promise<DesktopHubState | null> {
+  const api = bridge()
+  return api ? rememberHubState(await api.configureHub(url, token)) : null
+}
+
+export async function clearDesktopHub(): Promise<DesktopHubState | null> {
+  const api = bridge()
+  return api ? rememberHubState(await api.clearHub()) : null
+}
+
+export async function openDesktopHub(): Promise<boolean> {
+  const api = bridge()
+  return api ? await api.openHub() : false
+}
+
+/** A machine reached through the hub is told apart by where it sits under the hub, not by credentials. */
+function hubProfileID(config: ServerConfig): string | null {
+  if (!config.basePath || hubMachines.length === 0) return null
+  const wanted = normalizeServerConfig({ ...config, backend: "opencode", agentId: undefined })
+  if (!wanted) return null
+  for (const machine of hubMachines) {
+    const candidate = normalizeServerConfig({
+      backend: "opencode", host: machine.host, port: machine.port, username: "", password: "", basePath: machine.basePath
+    })
+    if (candidate && candidate.host === wanted.host && candidate.port === wanted.port && candidate.basePath === wanted.basePath) return machine.profileId
+  }
+  return null
+}
+
 function desktopMachineIdentity(config: ServerConfig): string | null {
   const normalized = normalizeServerConfig({ ...config, backend: "opencode", agentId: undefined })
   if (!normalized) return null
@@ -221,6 +268,8 @@ function localRuntimeProfileID(config: ServerConfig): string | null {
 }
 
 export function desktopProfileID(config: ServerConfig): string | null {
+  const hubID = hubProfileID(config)
+  if (hubID) return hubID
   const runtimeID = localRuntimeProfileID(config)
   if (runtimeID) return runtimeID
   const identity = desktopMachineIdentity(config)

@@ -278,6 +278,28 @@ test("bootstrap: signed-out callers get 200 + authenticated:false (no red consol
   assert.match(boot.publicUrl, /^http:\/\/127\.0\.0\.1:\d+$/)
 })
 
+test("fleet: an enrolled machine's token lists the fleet (Bearer or Basic hub-machine) and opens machines through the proxy; others are refused", { skip: skipDatabase }, async () => {
+  hub.forgetCookie()
+  const enrolled = (await enroll(machinePayload({ machine: { id: "machine_fleet_a" } }))).json
+  assert.equal((await hub.request("/api/v1/fleet")).status, 401)
+  assert.equal((await hub.request("/api/v1/fleet", { auth: "hrm_not-a-real-token" })).status, 401)
+
+  const bearer = await hub.request("/api/v1/fleet", { auth: enrolled.token })
+  assert.equal(bearer.status, 200)
+  assert.equal(bearer.json.hub, true)
+  assert.ok(bearer.json.machines.some((machine) => machine.id === "machine_fleet_a"))
+
+  const basic = `Basic ${Buffer.from(`hub-machine:${enrolled.token}`).toString("base64")}`
+  const viaBasic = await hub.request("/api/v1/fleet", { headers: { Authorization: basic } })
+  assert.equal(viaBasic.status, 200)
+  const wrongUser = `Basic ${Buffer.from(`someone:${enrolled.token}`).toString("base64")}`
+  assert.equal((await hub.request("/api/v1/fleet", { headers: { Authorization: wrongUser } })).status, 401)
+
+  // The proxy accepts the same credential; with a bad one it refuses before touching any machine.
+  assert.equal((await hub.request("/m/machine_fleet_a/api/x", { headers: { Authorization: `Basic ${Buffer.from("hub-machine:nope").toString("base64")}` } })).status, 401)
+  assert.notEqual((await hub.request("/m/machine_fleet_a/api/x", { headers: { Authorization: basic } })).status, 401)
+})
+
 test("stats summarises the fleet", { skip: skipDatabase }, async () => {
   await hub.login()
   const stats = (await hub.request("/api/v1/stats")).json

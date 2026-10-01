@@ -1,6 +1,6 @@
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises"
 import { dirname } from "node:path"
-import { baseUrl } from "../src/serverConfig.js"
+import { baseUrl, normalizeBasePath } from "../src/serverConfig.js"
 import type { BackendKind } from "../src/types.js"
 import type { DesktopProfile } from "./ipc-contract.js"
 
@@ -85,6 +85,8 @@ export function validateDesktopProfile(value: unknown): DesktopProfile {
   // desktop app sent all of them to the daemon's primary agent and each server showed that one
   // agent's sessions. The renderer already carries the field; main has to keep it to route at all.
   const agentId = candidate.agentId === undefined ? undefined : validateAgentID(candidate.agentId)
+  const basePath = candidate.basePath === undefined ? "" : normalizeBasePath(candidate.basePath)
+  if (basePath === null) throw new DesktopProfileError("Profile base path is invalid")
   const profile = {
     id,
     backend: candidate.backend,
@@ -92,7 +94,8 @@ export function validateDesktopProfile(value: unknown): DesktopProfile {
     port,
     username: candidate.username,
     password: candidate.password,
-    ...(agentId ? { agentId } : {})
+    ...(agentId ? { agentId } : {}),
+    ...(basePath ? { basePath } : {})
   }
   try {
     new URL(baseUrl(profile))
@@ -132,6 +135,7 @@ function sameProfile(left: DesktopProfile, right: DesktopProfile): boolean {
     && left.username === right.username
     && left.password === right.password
     && left.agentId === right.agentId
+    && (left.basePath ?? "") === (right.basePath ?? "")
 }
 
 /** Main-owned allowlist. Renderer profile mutation represents user-approved Settings state. */

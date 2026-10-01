@@ -19,6 +19,16 @@ export type HubBootstrap =
   /** Could not tell (network error, timeout, 5xx). Worth asking again; not proof of anything. */
   | { kind: "unavailable" }
 
+/** The desktop app's view of the hub (main fetched it): each machine becomes a workspace machine under its profile id. */
+export function desktopHubWorkspaceMachines(state: { machines: readonly { profileId: string; name: string; host: string; port: number; basePath: string }[] } | null): WorkspaceMachine[] {
+  return (state?.machines ?? []).map((machine) => ({
+    id: machine.profileId,
+    name: machine.name,
+    // Main holds the credentials (the hub machine token) and reaches the machine through the hub's proxy.
+    config: { backend: "opencode", host: machine.host, port: machine.port, username: "", password: "", basePath: machine.basePath }
+  }))
+}
+
 export type PageLocation = { protocol: string; hostname: string; port: string }
 
 const BOOTSTRAP_PATH = "api/v1/bootstrap"

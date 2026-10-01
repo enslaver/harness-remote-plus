@@ -41,7 +41,8 @@ function authHeader(profile: DesktopProfile): string | undefined {
 }
 
 function streamURL(profile: DesktopProfile, options: DesktopEventSubscriptionOptions): URL {
-  const url = new URL(options.scope === "global" ? "/global/event" : "/event", baseUrl(profile))
+  const base = new URL(baseUrl(profile))
+  const url = new URL(`${base.pathname.replace(/\/+$/, "")}${options.scope === "global" ? "/global/event" : "/event"}`, base.origin)
   if (options.scope === "project" && options.directory) url.searchParams.set("directory", options.directory)
   return url
 }

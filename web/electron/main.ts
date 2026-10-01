@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, nativeImage, screen, session, ipcMain, type IpcMainInvokeEvent } from "electron"
+import { app, BrowserWindow, Menu, Notification, nativeImage, screen, session, shell, ipcMain, type IpcMainInvokeEvent } from "electron"
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -9,6 +9,7 @@ import { IPC_CHANNELS, parseDesktopAttentionNotification, parseDesktopMenuTempla
 import { DesktopProfileError, ProfileRegistry } from "./profile-registry.js"
 import { executeDesktopRequest } from "./request-transport.js"
 import { resolveDesktopRuntimeEnvironment } from "./shell-path.js"
+import { HubLink } from "./hub-link.js"
 import type { DesktopAttentionNotification, DesktopCompletionNotification, DesktopEventSubscriptionOptions, DesktopLocalRuntimeState, DesktopMenuCommand, DesktopRequest } from "./ipc-contract.js"
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, restoredBounds as calculateRestoredBounds } from "./window-state.js"
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -47,6 +48,7 @@ let mainWindow: BrowserWindow | undefined
 let registry: ProfileRegistry
 let eventTransport: DesktopEventTransport
 let embeddedDaemon: EmbeddedDaemonRuntime | undefined
+let hubLink: HubLink | undefined
 let localRuntimeState: DesktopLocalRuntimeState = { status: "starting" }
 let localRuntimeStart: Promise<DesktopLocalRuntimeState> | undefined
 let quitting = false
@@ -316,6 +318,26 @@ function installIPC(): void {
     ensureTrustedSender(event)
     return ensureLocalRuntime()
   })
+  ipcMain.handle(IPC_CHANNELS.getHub, async (event) => {
+    ensureTrustedSender(event)
+    return hubLink!.state()
+  })
+  ipcMain.handle(IPC_CHANNELS.configureHub, async (event, url: unknown, token: unknown) => {
+    ensureTrustedSender(event)
+    return hubLink!.configure({ url, token })
+  })
+  ipcMain.handle(IPC_CHANNELS.openHub, async (event) => {
+    ensureTrustedSender(event)
+    // Only ever the address the user configured, never a renderer-supplied URL.
+    const url = hubLink!.state().url
+    if (!url) return false
+    await shell.openExternal(`${url}/hub/`)
+    return true
+  })
+  ipcMain.handle(IPC_CHANNELS.clearHub, async (event) => {
+    ensureTrustedSender(event)
+    return hubLink!.clear()
+  })
   ipcMain.handle(IPC_CHANNELS.subscribeEvents, async (event, profileId: unknown, options: unknown) => {
     ensureTrustedSender(event)
     if (typeof profileId !== "string" || !options || typeof options !== "object") throw new Error("Event payload is invalid")
@@ -366,15 +388,34 @@ async function start(): Promise<void> {
     // Resolve PATH lazily on every start/retry. GUI-launched macOS/Linux apps frequently do not
     // inherit the user's shell PATH, which is where Codex/Claude/OpenCode/OMP/PI are commonly
     // installed. The resolver imports PATH only and falls back to process.env on any shell failure.
-    environment: () => resolveDesktopRuntimeEnvironment(),
+    // The saved hub address and enrollment token ride along unless the environment already names a hub.
+    environment: async () => ({ ...(await resolveDesktopRuntimeEnvironment()), ...hubLink?.daemonEnvironment() }),
     stateDirectory: join(app.getPath("userData"), "embedded-daemon"),
     onExit: embeddedDaemonExited
   })
+  hubLink = new HubLink({
+    settingsPath: join(app.getPath("userData"), "hub-link.json"),
+    daemonStateDirectory: join(app.getPath("userData"), "embedded-daemon"),
+    environment: () => process.env,
+    setProfile: (id, profile) => {
+      const change = profile ? registry.setRuntimeProfile(profile) : registry.clearRuntimeProfile(id)
+      eventTransport.applyRegistryChange(change)
+    },
+    restartDaemon: async () => {
+      await embeddedDaemon?.stop()
+      clearLocalRuntimeProfile()
+      localRuntimeState = { status: "starting" }
+      void ensureLocalRuntime()
+    },
+    log
+  })
+  await hubLink.load()
   installIPC()
   // Starting the local runtime is intentionally non-fatal. A machine may have no supported harness
   // installed yet; the desktop app must still open so remote machines remain usable and the local
   // runtime can be retried later without an application restart.
   void ensureLocalRuntime()
+  hubLink.start()
   // macOS keeps its menu: the app menu is where Cmd+Q lives and the Edit menu is what binds
   // Cmd+C/V/X, so stripping it there costs the user the shortcuts they expect rather than just
   // hiding chrome. The renderer replaces Electron's untranslated default with the real one as soon
@@ -391,6 +432,7 @@ app.whenReady().then(() => start()).catch((error: unknown) => {
 })
 
 app.on("before-quit", (event) => {
+  hubLink?.stop()
   eventTransport?.closeAll()
   if (quitting) return
   event.preventDefault()

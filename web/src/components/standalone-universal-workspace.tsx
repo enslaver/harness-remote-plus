@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { App as CapacitorApp } from "@capacitor/app"
 import { api } from "../api"
 import { Capacitor } from "@capacitor/core"
@@ -100,6 +100,8 @@ function loadRailWidth(): number | null {
 }
 
 type Props = {
+  /** Hub link and "Configure hub", shown first in the top bar. */
+  hubControls?: ReactNode
   machines: WorkspaceMachine[]
   onPersistMachines: (machines: WorkspaceMachine[]) => void
   onScanMachinePairing?: () => Promise<void>
@@ -454,11 +456,13 @@ function compactNumber(value: number): string {
 
 
 function NativeSessionsWorkspace({
+  hubControls,
   machines,
   onManageMachines,
   onManageSettings,
   onAttentionCountChange
 }: {
+  hubControls?: ReactNode
   machines: WorkspaceMachine[]
   onManageMachines: () => void
   onManageSettings: () => void
@@ -953,6 +957,7 @@ function NativeSessionsWorkspace({
           {selected ? <><b>/</b><em>{selected.title}</em></> : null}
         </div>
         <div className="tdw-top-actions">
+          {hubControls}
           <span className="tdw-machine-health" aria-label={t("sf.machineCount", { online: onlineCount, total: machines.length })}>
             <i className={startupPhase === "ready" ? onlineCount > 0 ? "online" : "offline" : "pending"} aria-hidden="true" />
             {t("sf.machineCount", { online: onlineCount, total: machines.length })}
@@ -1170,6 +1175,7 @@ function NativeSessionsWorkspace({
 }
 
 export function StandaloneUniversalWorkspace({
+  hubControls,
   machines,
   onPersistMachines,
   onScanMachinePairing,
@@ -1257,7 +1263,7 @@ export function StandaloneUniversalWorkspace({
 
   return (
     <div className="uw-standalone-host">
-      <NativeSessionsWorkspace machines={machines} onManageMachines={showMachines} onManageSettings={showSettings} onAttentionCountChange={setAttentionCount} />
+      <NativeSessionsWorkspace hubControls={hubControls} machines={machines} onManageMachines={showMachines} onManageSettings={showSettings} onAttentionCountChange={setAttentionCount} />
       {managerOpen ? (
         <MachineManager
           machines={machines}

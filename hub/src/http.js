@@ -71,6 +71,22 @@ export function bearerToken(req) {
   return match ? match[1] : null
 }
 
+/** The user a desktop client sends with Basic auth, so its stock request transport can carry a machine token. */
+export const MACHINE_BASIC_USER = "hub-machine"
+
+/** A machine token from `Authorization: Bearer` or from Basic auth as `hub-machine:<token>`. */
+export function machineToken(req) {
+  const bearer = bearerToken(req)
+  if (bearer) return bearer
+  const header = req.headers.authorization
+  if (typeof header !== "string") return null
+  const match = /^Basic\s+(\S+)\s*$/i.exec(header)
+  if (!match) return null
+  const decoded = Buffer.from(match[1], "base64").toString("utf8")
+  const index = decoded.indexOf(":")
+  return index > 0 && decoded.slice(0, index) === MACHINE_BASIC_USER ? decoded.slice(index + 1) || null : null
+}
+
 export function parseCookies(header) {
   const cookies = {}
   if (typeof header !== "string") return cookies

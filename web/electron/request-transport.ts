@@ -114,8 +114,10 @@ function targetURL(profile: DesktopProfile, path: string): URL | null {
     return null
   }
   const scopedPath = MACHINE_SCOPED_PATH.test(target.pathname) ? path : agentScopedPath(profile, path)
+  // A hub-proxied machine lives under `/m/<id>`; every route is relative to that prefix.
+  const prefix = approved.pathname.replace(/\/+$/, "")
   try {
-    target = new URL(scopedPath, approved.origin)
+    target = new URL(`${prefix}${scopedPath}`, approved.origin)
   } catch {
     return null
   }
