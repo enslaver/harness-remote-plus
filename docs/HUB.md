@@ -76,6 +76,17 @@ machines next to *This computer*, and shows a **Hub** link to the console. If th
 `HARNESS_REMOTE_HUB_TOKEN`) are already set in the app's environment, the form is read-only and shows that. The token
 stays in the app's main process and is saved owner-only in the app's settings directory.
 
+### Machines advertised by Tailscale name
+
+The hub runs in Docker, and a container does not inherit the host's Tailscale resolver, so a machine advertised as
+`--hub-advertise-host jedi.<tailnet>.ts.net` shows **Web UI: Not reachable (ENOTFOUND)**. Either advertise the
+machine's tailnet IP (`--hub-advertise-host 100.x.y.z`), or enable the override that points the hub at MagicDNS:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.tailscale.yml in .env
+```
+
 ## What the hub can and cannot see
 
 Each heartbeat (every 30 s) carries: the machine's identity and software versions, its advertised addresses, a
