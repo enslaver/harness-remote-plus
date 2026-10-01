@@ -72,7 +72,7 @@ directly, with no Harness process to report from. It says so and continues witho
 
 The desktop app has a **Configure hub** button in the top bar. Enter the hub's address (`host:port` or a URL) and the
 enrollment token (`HUB_ENROLLMENT_TOKEN`); the app registers its local runtime with the hub, lists the hub's other
-machines next to *This computer*, and shows a **Hub** link to the console. If `HARNESS_REMOTE_HUB_URL` (and
+machines next to *This computer*, and shows a **Hub** link to the console. If this computer's runtime is already enrolled with a hub (it ran `--hub` once, or it is the hub's own host), the app follows that hub automatically and the form is not needed. If `HARNESS_REMOTE_HUB_URL` (and
 `HARNESS_REMOTE_HUB_TOKEN`) are already set in the app's environment, the form is read-only and shows that. The token
 stays in the app's main process and is saved owner-only in the app's settings directory.
 

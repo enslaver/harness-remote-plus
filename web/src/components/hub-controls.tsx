@@ -87,9 +87,12 @@ function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
               disabled={fromEnvironment || busy}
               autoComplete="off"
               spellCheck={false}
-              required={!fromEnvironment}
+              required={!fromEnvironment && state?.source !== "daemon"}
             />
           </label>
+          {state?.source === "daemon" ? (
+            <p className="hr-hub-config-note" role="status">This computer is already registered with this hub, so the app follows it automatically.</p>
+          ) : null}
           {state?.configured ? (
             <p className={`hr-hub-config-status ${state.status}`} role="status">
               {STATUS_TEXT[state.status]}{state.status === "connected" ? ` · ${state.machines.length} other ${state.machines.length === 1 ? "machine" : "machines"}` : ""}
@@ -98,7 +101,7 @@ function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
           ) : null}
           {error ? <p className="hr-hub-config-error" role="alert">{error}</p> : null}
           <footer className="hr-hub-config-actions">
-            {state?.configured && !fromEnvironment ? <button type="button" className="tdw-button secondary" disabled={busy} onClick={() => void run(onDisconnect)}>Disconnect</button> : null}
+            {state?.configured && !fromEnvironment && state.source !== "daemon" ? <button type="button" className="tdw-button secondary" disabled={busy} onClick={() => void run(onDisconnect)}>Disconnect</button> : null}
             <button type="button" className="tdw-button secondary" onClick={onClose}>Cancel</button>
             {fromEnvironment ? null : <button type="submit" className="tdw-button" disabled={busy}>{busy ? "Connecting…" : "Save and connect"}</button>}
           </footer>

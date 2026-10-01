@@ -122,8 +122,30 @@ test('configure saves 0600, restarts the daemon with the hub env, then lists the
 
   const cleared = await link.clear()
   link.stop()
-  assert.equal(cleared.configured, false)
-  assert.equal(h.calls.profiles.size, 0)
+  // The runtime is still enrolled (its hub.json is untouched), so the app keeps following that hub.
+  assert.equal(cleared.source, 'daemon')
+  assert.equal(cleared.url, 'http://hub.local:8080')
+})
+
+test('a runtime that is already enrolled makes the app follow its hub with no setup', async () => {
+  const requests = []
+  const fetchImpl = async (url, init) => {
+    requests.push({ url, authorization: init.headers.Authorization })
+    return new Response(JSON.stringify({ hub: true, machines: [{ id: 'other', name: 'Other', status: 'online', basePath: '/m/other' }] }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const h = harness({ fetchImpl })
+  const options = await h.options()
+  await writeFile(join(options.daemonStateDirectory, 'hub.json'), JSON.stringify({ url: 'https://hub.example.com', machineId: 'self', machineToken: 'hrm_machine' }))
+  const link = new HubLink(options)
+  await link.load()
+  assert.equal(link.state().source, 'daemon')
+  assert.equal(link.state().configured, true)
+  assert.deepEqual(link.daemonEnvironment(), {}, 'the daemon reconnects from its own hub.json')
+  await link.poll()
+  link.stop()
+  assert.equal(requests[0].url, 'https://hub.example.com/api/v1/fleet')
+  assert.equal(link.state().status, 'connected')
+  await assert.rejects(link.clear(), /enrolled/)
 })
 
 test('the environment wins and makes the form read-only', async () => {

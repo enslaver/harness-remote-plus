@@ -113,7 +113,11 @@ export class HubLink {
   private effective(): { settings: HubLinkSettings | null; source: DesktopHubState["source"] } {
     const fromEnvironment = this.environmentSettings()
     if (fromEnvironment) return { settings: fromEnvironment, source: "environment" }
-    return this.settings ? { settings: this.settings, source: "saved" } : { settings: null, source: "none" }
+    if (this.settings) return { settings: this.settings, source: "saved" }
+    // This computer's runtime is already enrolled with a hub (it ran `--hub` once, or is the hub's own host):
+    // the app follows it, with no form to fill in. The daemon holds the token; the app needs none of its own.
+    if (this.daemonState) return { settings: { url: this.daemonState.url, enrollmentToken: "" }, source: "daemon" }
+    return { settings: null, source: "none" }
   }
 
   async load(): Promise<void> {
@@ -123,6 +127,7 @@ export class HubLink {
     } catch {
       this.settings = null
     }
+    await this.refreshDaemonState()
   }
 
   /** What the embedded daemon should be started with, on top of its own environment. */
@@ -154,6 +159,7 @@ export class HubLink {
   }
 
   async clear(): Promise<DesktopHubState> {
+    if (this.effective().source === "daemon") throw new Error("This computer's runtime is enrolled with the hub on its own; stop it with --no-hub or delete the machine in the hub console")
     if (this.environmentSettings()) throw new Error("The hub is set by HARNESS_REMOTE_HUB_URL in this app's environment; unset it there")
     await writeFile(this.options.settingsPath, "{}\n", { mode: 0o600 }).catch(() => undefined)
     this.settings = null

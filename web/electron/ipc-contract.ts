@@ -54,7 +54,7 @@ export type DesktopHubState = {
   /** The hub's origin; never contains a credential. */
   url: string | null
   /** `environment` means HARNESS_REMOTE_HUB_URL is set for this app, so the form is read-only. */
-  source: "environment" | "saved" | "none"
+  source: "environment" | "saved" | "daemon" | "none"
   /** True once an enrollment token is in place; the token itself never reaches the renderer. */
   tokenSet: boolean
   status: "off" | "enrolling" | "connected" | "error"
