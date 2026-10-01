@@ -19,6 +19,12 @@ A self-hosted server for people with more than one machine. See [HUB.md](HUB.md)
 
 - `--hub <url> --hub-token <token>` (or `HARNESS_REMOTE_HUB_URL` / `HARNESS_REMOTE_HUB_TOKEN`): the machine
   enrolls once, remembers the hub, then reports its heartbeat, a Session inventory and redacted logs.
+- `--hub-advertise-name` / `--hub-advertise-host`: a display name and the host the hub uses to reach the machine.
+  The port is the gateway's own, detected automatically; both are remembered with the enrollment. Invalid
+  `--hub-advertise` values are logged, not silently dropped.
+- The desktop app follows the hub its runtime is already enrolled with (`hub.json`), with no setup.
+- `docker-compose.tailscale.yml`: opt-in override so the hub container resolves Tailscale MagicDNS names
+  (otherwise machines advertised by name show `ENOTFOUND`). See [HUB.md](HUB.md#machines-advertised-by-tailscale-name).
 - Claude Code background agents (`claude --bg`): list, start, follow, stop, continue, remove. See
   [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md).
 - A shared activity vocabulary (working, needs input, idle, completed, failed, stopped) across all harnesses.
