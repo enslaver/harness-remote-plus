@@ -52,8 +52,16 @@ revoked.
 | --- | --- | --- |
 | `--hub <url>` | `HARNESS_REMOTE_HUB_URL` | Which hub to report to. |
 | `--hub-token <token>` | `HARNESS_REMOTE_HUB_TOKEN` | Enrollment token. Prefer the environment: it stays out of `ps`. |
-| `--hub-name <name>` | `HARNESS_REMOTE_HUB_NAME` | Display name (default: the hostname). |
-| `--hub-advertise <url>` | `HARNESS_REMOTE_HUB_ADVERTISE` | Address the *hub* should use to reach this gateway; repeatable. Use it for a Tailscale/VPN address. Default: the machine's LAN addresses. |
+| `--hub-advertise-name <name>` | `HARNESS_REMOTE_HUB_ADVERTISE_NAME` | Display name (default: the hostname). `--hub-name` / `HARNESS_REMOTE_HUB_NAME` still work. |
+| `--hub-advertise-host <host>` | `HARNESS_REMOTE_HUB_ADVERTISE_HOST` | Host the *hub* should use to reach this gateway, e.g. `jedi.tailnet.ts.net`; repeatable. The port is the gateway's own, detected automatically (`host:port` overrides it). Use it for a Tailscale/VPN name. Default: the machine's LAN addresses. |
+| `--hub-advertise <url>` | `HARNESS_REMOTE_HUB_ADVERTISE` | Full address (scheme and port) for unusual setups. Invalid values are logged and ignored. |
+
+The name and advertise host are saved with the enrollment, so a bare re-run keeps them:
+
+```bash
+HARNESS_REMOTE_HUB_TOKEN=hre_… npx --yes github:enslaver/harness-remote-plus \
+  --hub https://hub.example.com --hub-advertise-name jedi --hub-advertise-host jedi.tailnet.ts.net
+```
 | `--hub-no-proxy` | `HARNESS_REMOTE_HUB_NO_PROXY=1` | Report to the hub but keep the gateway password on the machine. The hub then cannot open its web UI. |
 | `--no-hub` | | Do not contact the hub this run. |
 
