@@ -55,6 +55,13 @@ test("keeps the embedded daemon loopback-only, isolates state, and keeps credent
   assert.equal(env.HARNESS_REMOTE_PASSWORD, "desktop-pass")
 })
 
+test("listens on every interface only when a hub has to reach the runtime", () => {
+  assert.equal(embeddedDaemonArgs(4100, 4101)[1], "127.0.0.1")
+  const args = embeddedDaemonArgs(4100, 4101, undefined, "0.0.0.0")
+  assert.deepEqual(args.slice(0, 2), ["--host", "0.0.0.0"])
+  assert.equal(args[args.indexOf("--opencode-host") + 1], "127.0.0.1", "managed OpenCode stays on loopback")
+})
+
 test("skips a loopback port that is already occupied", async () => {
   const base = await findLoopbackPort(55_000, [], 1_000)
   const occupied = createServer()

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test, after } from 'node:test'
 
-const { HubLink, normalizeHubAddress, validateEnrollmentToken, hubMachineProfile } = await import('../dist-electron/electron/hub-link.js')
+const { HubLink, normalizeHubAddress, validateEnrollmentToken, validateMachineName, validateAdvertiseHost, hubMachineProfile } = await import('../dist-electron/electron/hub-link.js')
 const { ProfileRegistry } = await import('../dist-electron/electron/profile-registry.js')
 const { executeDesktopRequest } = await import('../dist-electron/electron/request-transport.js')
 
@@ -101,7 +101,8 @@ test('configure saves 0600, restarts the daemon with the hub env, then lists the
   assert.equal(configured.source, 'saved')
   assert.equal(JSON.stringify(configured).includes('0123456789abcdef-token'), false, 'the token never leaves main')
   assert.equal(h.calls.restart, 1)
-  assert.deepEqual(link.daemonEnvironment(), { HARNESS_REMOTE_HUB_URL: 'http://hub.local:8080', HARNESS_REMOTE_HUB_TOKEN: '0123456789abcdef-token' })
+  assert.deepEqual(link.daemonEnvironment(), { HARNESS_REMOTE_HUB_URL: 'http://hub.local:8080', HARNESS_REMOTE_HUB_TOKEN: '0123456789abcdef-token', HARNESS_REMOTE_HUB_ADVERTISE_NAME: '', HARNESS_REMOTE_HUB_ADVERTISE_HOST: '' })
+  assert.equal(link.sharesRuntime(), true, 'a configured hub means the runtime listens on the network')
   assert.match(await readFile(options.settingsPath, 'utf8'), /hub\.local/)
 
   // Not enrolled yet: no token to ask with, so no request is made.
@@ -177,4 +178,40 @@ test('a rejected token and an unreachable hub are statuses, never throws', async
     assert.equal(link.state().status, 'error')
     assert.match(link.state().error, expected)
   }
+})
+
+test('the machine name and reachable address are validated, saved, handed to the runtime and survive a token-less edit', async () => {
+  assert.equal(validateMachineName('  Desk  '), 'Desk')
+  assert.equal(validateMachineName(undefined), '')
+  assert.throws(() => validateMachineName('x'.repeat(81)), /80 characters/)
+  assert.equal(validateAdvertiseHost(''), '')
+  assert.equal(validateAdvertiseHost(' jedi.tail1.ts.net , 100.64.0.5 ,192.168.1.20'), 'jedi.tail1.ts.net,100.64.0.5,192.168.1.20')
+  assert.equal(validateAdvertiseHost('fd7a:115c:a1e0::1'), 'fd7a:115c:a1e0::1')
+  assert.throws(() => validateAdvertiseHost('http://jedi:4097'), /not a host/)
+  assert.throws(() => validateAdvertiseHost('jedi/path'), /not a host/)
+
+  const h = harness({ fetchImpl: async () => new Response('{}', { status: 500 }) })
+  const options = await h.options()
+  const link = new HubLink(options)
+  await link.load()
+  const first = await link.configure({ url: 'hub.local:8080', token: '0123456789abcdef-token', name: 'Studio', advertiseHost: '100.64.0.5' })
+  link.stop()
+  assert.equal(first.name, 'Studio')
+  assert.equal(first.advertiseHost, '100.64.0.5')
+  const environment = link.daemonEnvironment()
+  assert.equal(environment.HARNESS_REMOTE_HUB_ADVERTISE_NAME, 'Studio')
+  assert.equal(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST, '100.64.0.5')
+
+  // Changing only the name or host does not need the enrollment token pasted again; an empty value clears it.
+  const edited = await link.configure({ url: 'hub.local:8080', token: '', name: '', advertiseHost: '' })
+  link.stop()
+  assert.equal(edited.name, '')
+  assert.equal(link.daemonEnvironment().HARNESS_REMOTE_HUB_TOKEN, '0123456789abcdef-token')
+  assert.equal(link.daemonEnvironment().HARNESS_REMOTE_HUB_ADVERTISE_HOST, '')
+  await assert.rejects(link.configure({ url: 'other.hub:1', token: '', name: '', advertiseHost: '' }), /enrollment token/)
+
+  const reloaded = new HubLink(options)
+  await reloaded.load()
+  assert.equal(reloaded.state().url, 'http://hub.local:8080')
+  assert.equal(reloaded.state().name, '')
 })

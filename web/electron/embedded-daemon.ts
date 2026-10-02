@@ -4,6 +4,8 @@ import { createServer } from "node:net"
 import { join } from "node:path"
 
 export const EMBEDDED_DAEMON_HOST = "127.0.0.1"
+/** Where the daemon listens once a hub has to reach it: every interface, so Tailscale and the LAN both work. */
+export const EMBEDDED_DAEMON_NETWORK_HOST = "0.0.0.0"
 export const EMBEDDED_DAEMON_PROFILE_ID = "desktop-local-runtime"
 const DEFAULT_STARTUP_TIMEOUT_MS = 30_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5_000
@@ -52,9 +54,9 @@ export function embeddedDaemonEntry({ isPackaged, appPath, resourcesPath }: Embe
     : join(appPath, "..", "bridge", "src", "daemon-cli.js")
 }
 
-export function embeddedDaemonArgs(port: number, openCodePort: number, stateDirectory?: string): string[] {
+export function embeddedDaemonArgs(port: number, openCodePort: number, stateDirectory?: string, listenHost: string = EMBEDDED_DAEMON_HOST): string[] {
   return [
-    "--host", EMBEDDED_DAEMON_HOST,
+    "--host", listenHost,
     "--port", String(port),
     "--opencode-host", EMBEDDED_DAEMON_HOST,
     "--opencode-port", String(openCodePort),
@@ -140,6 +142,8 @@ export class EmbeddedDaemonRuntime {
     executable?: string
     environment?: EmbeddedDaemonEnvironment
     stateDirectory?: string
+    /** Evaluated on every launch: true when the daemon must be reachable beyond this computer (a hub is configured). */
+    listenOnNetwork?: () => boolean
     startupTimeoutMs?: number
     shutdownTimeoutMs?: number
     healthCheckIntervalMs?: number
@@ -206,7 +210,8 @@ export class EmbeddedDaemonRuntime {
     const openCodePort = reuse?.openCodePort ?? await findLoopbackPort(4096, [port])
     const auth = reuse?.auth ?? credentials()
     const launchConfig = { port, openCodePort, auth }
-    const args = embeddedDaemonArgs(port, openCodePort, this.options.stateDirectory)
+    const listenHost = this.options.listenOnNetwork?.() ? EMBEDDED_DAEMON_NETWORK_HOST : EMBEDDED_DAEMON_HOST
+    const args = embeddedDaemonArgs(port, openCodePort, this.options.stateDirectory, listenHost)
     const child = spawn(this.options.executable ?? process.execPath, [this.options.entryPath, ...args], {
       env: embeddedDaemonEnvironment(environment, auth),
       stdio: ["ignore", "pipe", "pipe"],
@@ -219,7 +224,7 @@ export class EmbeddedDaemonRuntime {
     let stderr = ""
     child.stderr?.on("data", (chunk) => { stderr = appendTail(stderr, chunk) })
 
-    const readyMarker = `Harness daemon ready at http://${EMBEDDED_DAEMON_HOST}:${port}`
+    const readyMarker = `Harness daemon ready at http://${listenHost}:${port}`
     const startupTimeoutMs = this.options.startupTimeoutMs ?? DEFAULT_STARTUP_TIMEOUT_MS
     try {
       await new Promise<void>((resolve, reject) => {

@@ -27,7 +27,7 @@ export type DesktopBridgeAPI = {
   getLocalRuntimeState(): Promise<DesktopLocalRuntimeState>
   retryLocalRuntime(): Promise<DesktopLocalRuntimeState>
   getHubState(): Promise<DesktopHubState>
-  configureHub(url: string, token: string): Promise<DesktopHubState>
+  configureHub(url: string, token: string, name: string, advertiseHost: string): Promise<DesktopHubState>
   clearHub(): Promise<DesktopHubState>
   openHub(): Promise<boolean>
   subscribeEvents(
@@ -219,9 +219,9 @@ export async function desktopHubState(): Promise<DesktopHubState | null> {
   return api ? rememberHubState(await api.getHubState()) : null
 }
 
-export async function configureDesktopHub(url: string, token: string): Promise<DesktopHubState | null> {
+export async function configureDesktopHub(url: string, token: string, name: string, advertiseHost: string): Promise<DesktopHubState | null> {
   const api = bridge()
-  return api ? rememberHubState(await api.configureHub(url, token)) : null
+  return api ? rememberHubState(await api.configureHub(url, token, name, advertiseHost)) : null
 }
 
 export async function clearDesktopHub(): Promise<DesktopHubState | null> {

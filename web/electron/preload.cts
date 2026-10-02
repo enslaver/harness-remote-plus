@@ -80,8 +80,8 @@ const harnessDesktop = Object.freeze({
   getHubState(): Promise<DesktopHubState> {
     return ipcRenderer.invoke(IPC_CHANNELS.getHub)
   },
-  configureHub(url: string, token: string): Promise<DesktopHubState> {
-    return ipcRenderer.invoke(IPC_CHANNELS.configureHub, url, token)
+  configureHub(url: string, token: string, name: string, advertiseHost: string): Promise<DesktopHubState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.configureHub, url, token, name, advertiseHost)
   },
   clearHub(): Promise<DesktopHubState> {
     return ipcRenderer.invoke(IPC_CHANNELS.clearHub)

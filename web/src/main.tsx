@@ -202,7 +202,7 @@ function useDesktopHub() {
   return {
     state,
     machines,
-    configure: async (url: string, token: string) => { setState(await configureDesktopHub(url, token)) },
+    configure: async (url: string, token: string, name: string, advertiseHost: string) => { setState(await configureDesktopHub(url, token, name, advertiseHost)) },
     disconnect: async () => { setState(await clearDesktopHub()) },
     open: () => { void openDesktopHub() }
   }

@@ -99,16 +99,18 @@ export async function resolveHubOptions({ flags, environment = process.env, stat
   const advertise = flags.advertise.length ? flags.advertise : list(environment.HARNESS_REMOTE_HUB_ADVERTISE)
   // Name and route-back host are remembered with the enrollment, so a bare re-run keeps them.
   const remembered = saved && saved.url === url ? saved : undefined
+  // A variable that is set but empty is an answer too ("advertise nothing special"): it is how the desktop's
+  // settings form clears a host it saved earlier, so it must not fall back to what was remembered.
   const advertiseHosts = flags.advertiseHosts?.length
     ? flags.advertiseHosts
-    : list(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST).length ? list(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST) : remembered?.advertiseHosts ?? []
+    : environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST !== undefined ? list(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST) : remembered?.advertiseHosts ?? []
 
   const intervalOverride = Number(environment.HARNESS_REMOTE_HUB_INTERVAL_MS)
   return {
     url,
     enrollmentToken,
     machineToken,
-    name: flags.name ?? environment.HARNESS_REMOTE_HUB_ADVERTISE_NAME ?? environment.HARNESS_REMOTE_HUB_NAME ?? remembered?.name ?? undefined,
+    name: (flags.name ?? environment.HARNESS_REMOTE_HUB_ADVERTISE_NAME ?? environment.HARNESS_REMOTE_HUB_NAME ?? remembered?.name)?.trim() || undefined,
     advertise,
     advertiseHosts,
     noProxy: Boolean(flags.noProxy) || truthy(environment.HARNESS_REMOTE_HUB_NO_PROXY),

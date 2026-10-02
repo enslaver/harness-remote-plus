@@ -10,7 +10,7 @@ export type HubControlsProps = {
   /** Present in the desktop app: the hub it is configured for, and the means to change that. */
   desktop?: {
     state: DesktopHubState | null
-    onConfigure: (url: string, token: string) => Promise<void>
+    onConfigure: (url: string, token: string, name: string, advertiseHost: string) => Promise<void>
     onDisconnect: () => Promise<void>
     onOpen: () => void
   }
@@ -25,7 +25,7 @@ const STATUS_TEXT: Record<DesktopHubState["status"], string> = {
 
 function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
   state: DesktopHubState | null
-  onConfigure: (url: string, token: string) => Promise<void>
+  onConfigure: (url: string, token: string, name: string, advertiseHost: string) => Promise<void>
   onDisconnect: () => Promise<void>
   onClose: () => void
 }) {
@@ -34,6 +34,8 @@ function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
   const fromEnvironment = state?.source === "environment"
   const [url, setUrl] = useState(state?.url ?? "")
   const [token, setToken] = useState("")
+  const [name, setName] = useState(state?.name ?? "")
+  const [advertiseHost, setAdvertiseHost] = useState(state?.advertiseHost ?? "")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -54,7 +56,7 @@ function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    if (!fromEnvironment) void run(() => onConfigure(url, token))
+    if (!fromEnvironment) void run(() => onConfigure(url, token, name, advertiseHost))
   }
 
   return (
@@ -87,8 +89,17 @@ function HubConfigDialog({ state, onConfigure, onDisconnect, onClose }: {
               disabled={fromEnvironment || busy}
               autoComplete="off"
               spellCheck={false}
-              required={!fromEnvironment && state?.source !== "daemon"}
+              required={!fromEnvironment && state?.source !== "daemon" && !state?.tokenSet}
             />
+          </label>
+          <label>
+            <span>Machine name</span>
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="This computer's host name" disabled={fromEnvironment || busy} maxLength={80} autoComplete="off" spellCheck={false} />
+          </label>
+          <label>
+            <span>Reachable address</span>
+            <input value={advertiseHost} onChange={(event) => setAdvertiseHost(event.target.value)} placeholder="Automatic: Tailscale, then local network" disabled={fromEnvironment || busy} autoComplete="off" spellCheck={false} />
+            <small>The host the hub uses to reach this computer: a Tailscale name or IP, a local IP, or an external IP or DNS name. Separate several with commas. Leave empty to detect it.</small>
           </label>
           {state?.source === "daemon" ? (
             <p className="hr-hub-config-note" role="status">This computer is already registered with this hub, so the app follows it automatically.</p>

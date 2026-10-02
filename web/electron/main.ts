@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Menu, Notification, nativeImage, screen, session, shell, ipcMain, type IpcMainInvokeEvent } from "electron"
+import { app, BrowserWindow, Menu, Notification, nativeImage, screen, session, shell, ipcMain, type IpcMainInvokeEvent, type Tray } from "electron"
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -10,6 +10,7 @@ import { DesktopProfileError, ProfileRegistry } from "./profile-registry.js"
 import { executeDesktopRequest } from "./request-transport.js"
 import { resolveDesktopRuntimeEnvironment } from "./shell-path.js"
 import { HubLink } from "./hub-link.js"
+import { createTray } from "./tray.js"
 import type { DesktopAttentionNotification, DesktopCompletionNotification, DesktopEventSubscriptionOptions, DesktopLocalRuntimeState, DesktopMenuCommand, DesktopRequest } from "./ipc-contract.js"
 import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, restoredBounds as calculateRestoredBounds } from "./window-state.js"
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -49,6 +50,7 @@ let registry: ProfileRegistry
 let eventTransport: DesktopEventTransport
 let embeddedDaemon: EmbeddedDaemonRuntime | undefined
 let hubLink: HubLink | undefined
+let tray: Tray | undefined
 let localRuntimeState: DesktopLocalRuntimeState = { status: "starting" }
 let localRuntimeStart: Promise<DesktopLocalRuntimeState> | undefined
 let quitting = false
@@ -198,6 +200,20 @@ function notifyAttention(notification: DesktopAttentionNotification): void {
   if (!icon.isEmpty()) window.setOverlayIcon(icon, notification.overlayDescription)
 }
 
+/** Bring the window back from the tray or the taskbar, making a fresh one if it is gone. */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow()
+  const window = mainWindow
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+}
+
+function quitService(): void {
+  quitting = true
+  app.quit()
+}
+
 function createWindow(): BrowserWindow {
   const savedState = readWindowState()
   const window = new BrowserWindow({
@@ -244,9 +260,15 @@ function createWindow(): BrowserWindow {
   window.on("move", scheduleWindowStateSave)
   window.on("maximize", scheduleWindowStateSave)
   window.on("unmaximize", scheduleWindowStateSave)
-  window.on("close", () => {
+  window.on("close", (event) => {
     saveWindowState()
     cancelWindowStateSave()
+    // Closing the window leaves the app running in the notification area, like a service; only the
+    // tray's "Exit service" (or the OS shutting down) really quits. macOS keeps its own convention.
+    if (!quitting && tray && !isMac) {
+      event.preventDefault()
+      window.hide()
+    }
   })
   window.on("focus", () => {
     // Guarded rather than left to fail quietly: setOverlayIcon is absent on macOS and Linux, not
@@ -322,9 +344,9 @@ function installIPC(): void {
     ensureTrustedSender(event)
     return hubLink!.state()
   })
-  ipcMain.handle(IPC_CHANNELS.configureHub, async (event, url: unknown, token: unknown) => {
+  ipcMain.handle(IPC_CHANNELS.configureHub, async (event, url: unknown, token: unknown, name: unknown, advertiseHost: unknown) => {
     ensureTrustedSender(event)
-    return hubLink!.configure({ url, token })
+    return hubLink!.configure({ url, token, name, advertiseHost })
   })
   ipcMain.handle(IPC_CHANNELS.openHub, async (event) => {
     ensureTrustedSender(event)
@@ -376,6 +398,11 @@ async function start(): Promise<void> {
   // under the directory Electron derived from the original name. Keep using it so an upgrade does
   // not look like a fresh install with no machines.
   app.setPath("userData", join(app.getPath("appData"), "Harness Remote"))
+  // One instance owns the tray and the local runtime; launching the app again just brings its window back.
+  if (!app.requestSingleInstanceLock()) {
+    app.quit()
+    return
+  }
   registry = new ProfileRegistry(profileFile())
   await registry.load()
   eventTransport = new DesktopEventTransport(registry, IPC_CHANNELS)
@@ -391,6 +418,8 @@ async function start(): Promise<void> {
     // The saved hub address and enrollment token ride along unless the environment already names a hub.
     environment: async () => ({ ...(await resolveDesktopRuntimeEnvironment()), ...hubLink?.daemonEnvironment() }),
     stateDirectory: join(app.getPath("userData"), "embedded-daemon"),
+    // With a hub configured the hub connects in, so the runtime listens on the network (still behind its Basic auth).
+    listenOnNetwork: () => hubLink?.sharesRuntime() ?? false,
     onExit: embeddedDaemonExited
   })
   hubLink = new HubLink({
@@ -424,7 +453,19 @@ async function start(): Promise<void> {
   if (!isDevelopment && !isMac) Menu.setApplicationMenu(null)
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false))
   mainWindow = createWindow()
+  if (!isMac) {
+    tray = createTray({
+      iconPath: join(app.getAppPath(), "dist/app-icon.png"),
+      tooltip: "Harness Remote Plus",
+      openLabel: "Open Harness Remote Plus",
+      quitLabel: "Exit service",
+      onOpen: showMainWindow,
+      onQuit: quitService
+    })
+  }
 }
+
+app.on("second-instance", () => showMainWindow())
 
 app.whenReady().then(() => start()).catch((error: unknown) => {
   log(`startup failed: ${error instanceof Error ? error.message : "unknown error"}`)
@@ -442,8 +483,14 @@ app.on("before-quit", (event) => {
 // Closing the last window ends the app everywhere except macOS, where an app with no windows is
 // still running and is expected to reopen one from the dock — which is what "activate" below does.
 app.on("window-all-closed", () => {
-  if (!isMac) app.quit()
+  // With a tray icon the app outlives its window; without one (the icon could not load) it would be
+  // unreachable, so it ends with the window as it always did.
+  if (!isMac && !tray) app.quit()
 })
 app.on("activate", () => {
   if (!mainWindow) mainWindow = createWindow()
+})
+app.on("will-quit", () => {
+  tray?.destroy()
+  tray = undefined
 })
