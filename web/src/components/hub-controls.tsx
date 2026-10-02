@@ -2,7 +2,7 @@ import { useRef, useState, type FormEvent } from "react"
 import { createPortal } from "react-dom"
 import type { DesktopHubState } from "../../electron/ipc-contract"
 import { useDialogDismiss } from "../useDialogDismiss"
-import "./hub-controls.css"
+import "../hub-controls.css"
 
 export type HubControlsProps = {
   /** Present when this page is served by a hub: the link is to that hub's console, on the same origin. */

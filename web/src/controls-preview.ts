@@ -28,6 +28,7 @@ import "./taskdesk-mobile-navigation.css"
 import "./taskdesk-focus-layout.css"
 import "./conversation-control-plane.css"
 import "./machine-manager-health.css"
+import "./hub-controls.css"
 
 /* Then main.tsx's list, in main.tsx's order, ending on the ported controls. */
 import "./styles.css"
