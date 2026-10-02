@@ -10,7 +10,14 @@ const RETRY_MS = 10_000
 const FETCH_TIMEOUT_MS = 5_000
 const BASE_PATH = /^\/m\/[^/?#]+$/
 
-export type HubLinkSettings = { url: string; enrollmentToken: string }
+export type HubLinkSettings = {
+  url: string
+  enrollmentToken: string
+  /** How this machine is named in the hub; empty means its hostname. */
+  name: string
+  /** Hosts the hub should use to reach this machine; empty means detect (Tailscale first, then LAN). */
+  advertiseHost: string
+}
 
 /** `host:port`, `host` or a full http(s) URL -> the hub's origin, or throws a message fit for the form. */
 export function normalizeHubAddress(input: unknown): string {
@@ -26,6 +33,28 @@ export function normalizeHubAddress(input: unknown): string {
   if (url.username || url.password) throw new Error("Do not put credentials in the hub address; use the enrollment token field")
   if (url.search || url.hash) throw new Error("The hub address must not include a query or fragment")
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`
+}
+
+export function validateMachineName(input: unknown): string {
+  const name = typeof input === "string" ? input.trim() : ""
+  if (name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) throw new Error("The machine name is at most 80 characters, with no control characters")
+  return name
+}
+
+/** One or more comma-separated hosts or addresses (no scheme, no path); the gateway's own port is added by the runtime. */
+export function validateAdvertiseHost(input: unknown): string {
+  const raw = typeof input === "string" ? input.trim() : ""
+  if (!raw) return ""
+  const hosts = raw.split(",").map((item) => item.trim()).filter(Boolean)
+  for (const host of hosts) {
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(host) || /[/?#@\s]/.test(host)) throw new Error(`"${host}" is not a host: use a Tailscale name, an IP address or a DNS name without http:// or a path`)
+    try {
+      new URL(`http://${host.includes(":") && host.split(":").length > 2 && !host.startsWith("[") ? `[${host}]` : host}`)
+    } catch {
+      throw new Error(`"${host}" is not a valid host name or address`)
+    }
+  }
+  return hosts.join(",")
 }
 
 export function validateEnrollmentToken(input: unknown): string {
@@ -66,7 +95,15 @@ export function hubMachineProfile(entry: unknown, hubUrl: string, machineToken: 
   }
 }
 
-type SavedHubState = { url?: unknown; machineId?: unknown; machineToken?: unknown }
+type SavedHubState = { url?: unknown; machineId?: unknown; machineToken?: unknown; name?: unknown; advertiseHosts?: unknown }
+
+function safely(read: () => string): string {
+  try {
+    return read()
+  } catch {
+    return ""
+  }
+}
 
 export type HubLinkOptions = {
   /** Where the desktop keeps its own settings (the saved address and enrollment token). */
@@ -103,7 +140,12 @@ export class HubLink {
     const url = env.HARNESS_REMOTE_HUB_URL?.trim()
     if (!url) return null
     try {
-      return { url: normalizeHubAddress(url), enrollmentToken: env.HARNESS_REMOTE_HUB_TOKEN?.trim() ?? "" }
+      return {
+        url: normalizeHubAddress(url),
+        enrollmentToken: env.HARNESS_REMOTE_HUB_TOKEN?.trim() ?? "",
+        name: env.HARNESS_REMOTE_HUB_ADVERTISE_NAME?.trim() ?? env.HARNESS_REMOTE_HUB_NAME?.trim() ?? "",
+        advertiseHost: env.HARNESS_REMOTE_HUB_ADVERTISE_HOST?.trim() ?? ""
+      }
     } catch {
       return null
     }
@@ -116,14 +158,20 @@ export class HubLink {
     if (this.settings) return { settings: this.settings, source: "saved" }
     // This computer's runtime is already enrolled with a hub (it ran `--hub` once, or is the hub's own host):
     // the app follows it, with no form to fill in. The daemon holds the token; the app needs none of its own.
-    if (this.daemonState) return { settings: { url: this.daemonState.url, enrollmentToken: "" }, source: "daemon" }
+    if (this.daemonState) return { settings: { url: this.daemonState.url, enrollmentToken: "", name: this.daemonState.name ?? "", advertiseHost: this.daemonState.advertiseHosts?.join(",") ?? "" }, source: "daemon" }
     return { settings: null, source: "none" }
   }
 
   async load(): Promise<void> {
     try {
-      const parsed = JSON.parse(await readFile(this.options.settingsPath, "utf8")) as { url?: unknown; enrollmentToken?: unknown }
-      this.settings = { url: normalizeHubAddress(parsed.url), enrollmentToken: validateEnrollmentToken(parsed.enrollmentToken) }
+      const parsed = JSON.parse(await readFile(this.options.settingsPath, "utf8")) as { url?: unknown; enrollmentToken?: unknown; name?: unknown; advertiseHost?: unknown }
+      this.settings = {
+        url: normalizeHubAddress(parsed.url),
+        enrollmentToken: parsed.enrollmentToken === "" ? "" : validateEnrollmentToken(parsed.enrollmentToken),
+        // Optional, and written by newer versions only: a bad value is dropped rather than losing the whole link.
+        name: safely(() => validateMachineName(parsed.name)),
+        advertiseHost: safely(() => validateAdvertiseHost(parsed.advertiseHost))
+      }
     } catch {
       this.settings = null
     }
@@ -133,7 +181,18 @@ export class HubLink {
   /** What the embedded daemon should be started with, on top of its own environment. */
   daemonEnvironment(): NodeJS.ProcessEnv {
     if (this.environmentSettings() || !this.settings) return {}
-    return { HARNESS_REMOTE_HUB_URL: this.settings.url, HARNESS_REMOTE_HUB_TOKEN: this.settings.enrollmentToken }
+    // Always set, even when empty: an empty value tells the runtime to forget a name or host saved earlier.
+    return {
+      HARNESS_REMOTE_HUB_URL: this.settings.url,
+      HARNESS_REMOTE_HUB_TOKEN: this.settings.enrollmentToken,
+      HARNESS_REMOTE_HUB_ADVERTISE_NAME: this.settings.name,
+      HARNESS_REMOTE_HUB_ADVERTISE_HOST: this.settings.advertiseHost
+    }
+  }
+
+  /** The runtime has to listen beyond loopback, or the hub has nothing to connect to. */
+  sharesRuntime(): boolean {
+    return this.effective().settings !== null
   }
 
   state(): DesktopHubState {
@@ -141,6 +200,8 @@ export class HubLink {
     return {
       configured: settings !== null,
       url: settings?.url ?? null,
+      name: settings?.name ?? "",
+      advertiseHost: settings?.advertiseHost ?? "",
       source,
       // The token never leaves main; the form only learns whether one is in place.
       tokenSet: Boolean(settings?.enrollmentToken) || this.daemonState !== null,
@@ -150,9 +211,20 @@ export class HubLink {
     }
   }
 
-  async configure(input: { url: unknown; token: unknown }): Promise<DesktopHubState> {
+  async configure(input: { url: unknown; token: unknown; name?: unknown; advertiseHost?: unknown }): Promise<DesktopHubState> {
     if (this.environmentSettings()) throw new Error("The hub is set by HARNESS_REMOTE_HUB_URL in this app's environment; change it there")
-    const settings = { url: normalizeHubAddress(input.url), enrollmentToken: validateEnrollmentToken(input.token) }
+    const url = normalizeHubAddress(input.url)
+    // Editing only the name or host must not mean pasting the enrollment token again.
+    const keptToken = this.settings && this.settings.url === url ? this.settings.enrollmentToken : ""
+    const blankToken = typeof input.token !== "string" || !input.token.trim()
+    // A runtime that already enrolled with this hub holds its own machine token and needs no enrollment token.
+    const alreadyEnrolled = this.daemonState?.url === url
+    const settings: HubLinkSettings = {
+      url,
+      enrollmentToken: blankToken && (keptToken || alreadyEnrolled) ? keptToken : validateEnrollmentToken(input.token),
+      name: validateMachineName(input.name),
+      advertiseHost: validateAdvertiseHost(input.advertiseHost)
+    }
     await this.save(settings)
     this.settings = settings
     return this.reconfigured()
@@ -187,13 +259,19 @@ export class HubLink {
   }
 
   /** Cached copy of the daemon's `hub.json`, refreshed on every poll. */
-  private daemonState: { url: string; machineId?: string; machineToken: string } | null = null
+  private daemonState: { url: string; machineId?: string; machineToken: string; name?: string; advertiseHosts?: string[] } | null = null
 
   private async refreshDaemonState(): Promise<void> {
     try {
       const saved = JSON.parse(await readFile(join(this.options.daemonStateDirectory, "hub.json"), "utf8")) as SavedHubState
       this.daemonState = typeof saved.url === "string" && typeof saved.machineToken === "string" && saved.machineToken
-        ? { url: saved.url, machineToken: saved.machineToken, ...(typeof saved.machineId === "string" ? { machineId: saved.machineId } : {}) }
+        ? {
+            url: saved.url,
+            machineToken: saved.machineToken,
+            ...(typeof saved.machineId === "string" ? { machineId: saved.machineId } : {}),
+            ...(typeof saved.name === "string" ? { name: saved.name } : {}),
+            ...(Array.isArray(saved.advertiseHosts) ? { advertiseHosts: saved.advertiseHosts.filter((host): host is string => typeof host === "string") } : {})
+          }
         : null
     } catch {
       this.daemonState = null

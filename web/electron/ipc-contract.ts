@@ -53,6 +53,10 @@ export type DesktopHubState = {
   configured: boolean
   /** The hub's origin; never contains a credential. */
   url: string | null
+  /** This machine's name in the hub; empty means its hostname. */
+  name: string
+  /** Hosts the hub is told to reach this machine at; empty means detected (Tailscale, then LAN). */
+  advertiseHost: string
   /** `environment` means HARNESS_REMOTE_HUB_URL is set for this app, so the form is read-only. */
   source: "environment" | "saved" | "daemon" | "none"
   /** True once an enrollment token is in place; the token itself never reaches the renderer. */

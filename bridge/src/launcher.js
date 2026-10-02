@@ -17,9 +17,9 @@ const BACKEND_EXECUTABLES = {
   opencode: ["opencode"]
 }
 
-// This is product policy, not alphabetical order: prefer the broadest/most-tested ACP path first.
-// Reordering this changes the default primary on every multi-agent machine.
-const ACP_BACKENDS = ["codex", "claude", "omp", "pi"]
+// This is product policy, not alphabetical order. Reordering this changes the default primary on every
+// multi-agent machine. Codex is last on purpose: it must be asked for with --backend, not assumed.
+const ACP_BACKENDS = ["claude", "omp", "pi", "codex"]
 const VIRTUAL_INTERFACE = /^(docker|br-|veth|virbr|tun|tap|utun)/i
 
 function optionValue(args, name) {

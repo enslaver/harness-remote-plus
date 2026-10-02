@@ -3,7 +3,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, readFile, rm, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { HubReporter, advertisedEndpoints, describeConfig, prepareHubReporting } from "../src/hub-reporter.js"
+import { HubReporter, advertisedEndpoints, describeConfig, lanAddresses, prepareHubReporting } from "../src/hub-reporter.js"
 import { readHubState } from "../src/hub-options.js"
 import { LogTee, createRedactor } from "../src/log-tee.js"
 import { fakeStream, startFakeHub } from "./helpers/fake-hub.js"
@@ -632,4 +632,14 @@ test("an inventory too large for the hub is reported as empty instead of making 
   } finally {
     await t.done()
   }
+})
+
+test("lanAddresses: Tailscale addresses come first, loopback and IPv6 are skipped", () => {
+  const interfaces = {
+    Ethernet: [{ family: "IPv4", address: "192.168.1.20", internal: false }, { family: "IPv6", address: "fe80::1", internal: false }],
+    Loopback: [{ family: "IPv4", address: "127.0.0.1", internal: true }],
+    Tailscale: [{ family: "IPv4", address: "100.101.102.103", internal: false }],
+    Docker: [{ family: "IPv4", address: "100.200.0.1", internal: false }]
+  }
+  assert.deepEqual(lanAddresses(interfaces), ["100.101.102.103", "192.168.1.20", "100.200.0.1"])
 })

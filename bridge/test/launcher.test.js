@@ -53,7 +53,13 @@ test("auto-selects exactly one detected backend", () => {
 })
 
 test("starts the machine daemon automatically when multiple agents are detected", () => {
-  assert.deepEqual(resolveLaunchPlan([], ["claude", "codex", "opencode"]), { mode: "daemon", backend: "codex", detected: ["claude", "codex", "opencode"], openCode: true })
+  assert.deepEqual(resolveLaunchPlan([], ["claude", "codex", "opencode"]), { mode: "daemon", backend: "claude", detected: ["claude", "codex", "opencode"], openCode: true })
+})
+
+test("never picks codex as the daemon primary while another ACP agent is installed", () => {
+  assert.equal(resolveLaunchPlan([], ["codex", "pi"]).backend, "pi")
+  assert.equal(resolveLaunchPlan([], ["codex", "omp", "claude"]).backend, "claude")
+  assert.equal(resolveLaunchPlan(["--backend", "codex"], ["codex", "pi"]).backend, "codex")
 })
 
 test("uses --backend to select the daemon primary", () => {

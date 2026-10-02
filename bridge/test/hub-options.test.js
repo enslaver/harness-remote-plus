@@ -137,3 +137,22 @@ test("hub state is written atomically, owner-only, and tolerates junk", async ()
     assert.equal(await readHubState(dir), null)
   })
 })
+
+test("resolveHubOptions: an empty advertise-host variable clears the remembered host, an absent one keeps it", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "hub-options-"))
+  try {
+    await writeHubState(dir, { url: "https://h", machineToken: "mt", name: "Desk", advertiseHosts: ["jedi.ts.net"] })
+    const base = { flags: { advertise: [], advertiseHosts: [] }, stateDirectory: dir }
+    const kept = await resolveHubOptions({ ...base, environment: {} })
+    assert.deepEqual(kept.advertiseHosts, ["jedi.ts.net"])
+    assert.equal(kept.name, "Desk")
+    const cleared = await resolveHubOptions({ ...base, environment: { HARNESS_REMOTE_HUB_ADVERTISE_HOST: "", HARNESS_REMOTE_HUB_ADVERTISE_NAME: "  " } })
+    assert.deepEqual(cleared.advertiseHosts, [])
+    assert.equal(cleared.name, undefined)
+    const replaced = await resolveHubOptions({ ...base, environment: { HARNESS_REMOTE_HUB_ADVERTISE_HOST: "100.64.0.9, desk.local", HARNESS_REMOTE_HUB_ADVERTISE_NAME: " Studio " } })
+    assert.deepEqual(replaced.advertiseHosts, ["100.64.0.9", "desk.local"])
+    assert.equal(replaced.name, "Studio")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})

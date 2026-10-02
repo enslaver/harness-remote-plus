@@ -27,12 +27,18 @@ function packageVersion() {
   return "unknown"
 }
 
-function lanAddresses(interfaces = networkInterfaces()) {
+export function lanAddresses(interfaces = networkInterfaces()) {
   const found = []
   for (const addresses of Object.values(interfaces)) {
     for (const address of addresses ?? []) if (address.family === "IPv4" && !address.internal) found.push(address.address)
   }
-  return [...new Set(found)]
+  // Tailscale addresses (100.64.0.0/10) lead: they are reachable from anywhere on the tailnet, a LAN address only from the LAN.
+  return [...new Set(found)].sort((left, right) => Number(isTailscaleAddress(right)) - Number(isTailscaleAddress(left)))
+}
+
+function isTailscaleAddress(address) {
+  const [first, second] = String(address).split(".").map(Number)
+  return first === 100 && second >= 64 && second <= 127
 }
 
 /** Addresses the hub could use to reach this gateway. Loopback is useless to a remote hub, so it is not offered. */
