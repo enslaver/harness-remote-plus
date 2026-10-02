@@ -177,7 +177,7 @@ npx --yes github:enslaver/harness-remote-plus --cors https://giuliastro.github.i
 
 The gateway deliberately does not pretend to host the web UI itself; it prints connection information for the client.
 
-Want one address for all your machines, including from an iPhone? Run the [hub](HUB.md): `docker compose up` serves the web app, keeps a registry of every install and collects their logs. Point a machine at it with `--hub https://hub.example.com --hub-token …`.
+Want one address for all your machines, including from an iPhone? Run the [hub](HUB.md): `docker compose up` serves the web app, keeps a registry of every install and collects their logs. Point a machine at it with `--hub https://hub.example.com --hub-token …`. On a tailnet, add `--hub-advertise-name <name> --hub-advertise-host <host>` (the port is detected); if the hub runs in Docker and the host is a MagicDNS name, enable the DNS override described in [HUB.md](HUB.md#machines-advertised-by-tailscale-name).
 
 ## Running from a local checkout
 

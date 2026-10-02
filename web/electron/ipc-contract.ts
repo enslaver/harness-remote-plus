@@ -7,6 +7,10 @@ export const IPC_CHANNELS = Object.freeze({
   unsubscribeEvents: "desktop:events:unsubscribe",
   getLocalRuntime: "desktop:runtime:local:get",
   retryLocalRuntime: "desktop:runtime:local:retry",
+  getHub: "desktop:hub:get",
+  configureHub: "desktop:hub:configure",
+  clearHub: "desktop:hub:clear",
+  openHub: "desktop:hub:open",
   notifyCompletion: "desktop:completion:notify",
   notifyAttention: "desktop:attention:notify",
   attentionActivated: "desktop:attention:activated",
@@ -34,6 +38,29 @@ export type DesktopLocalRuntimeState =
   | { status: "starting" }
   | { status: "ready"; machine: DesktopLocalRuntimeMachine }
   | { status: "unavailable"; error: string }
+
+/** A machine the hub lists, reachable through the hub's proxy under the main-owned profile `profileId`. */
+export type DesktopHubMachine = {
+  profileId: string
+  name: string
+  status: string
+  host: string
+  port: number
+  basePath: string
+}
+
+export type DesktopHubState = {
+  configured: boolean
+  /** The hub's origin; never contains a credential. */
+  url: string | null
+  /** `environment` means HARNESS_REMOTE_HUB_URL is set for this app, so the form is read-only. */
+  source: "environment" | "saved" | "daemon" | "none"
+  /** True once an enrollment token is in place; the token itself never reaches the renderer. */
+  tokenSet: boolean
+  status: "off" | "enrolling" | "connected" | "error"
+  error?: string
+  machines: DesktopHubMachine[]
+}
 
 export type DesktopCompletionNotification = {
   title: string
@@ -100,6 +127,8 @@ export type DesktopProfile = {
   username: string
   password: string
   agentId?: string
+  /** Path prefix in front of the machine's routes, e.g. `/m/<id>` for a machine reached through a hub. */
+  basePath?: string
 }
 
 export type DesktopRequestMethod = "GET" | "POST" | "PATCH" | "DELETE"

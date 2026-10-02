@@ -1,0 +1,11 @@
+# Optional override: lets the hub container resolve Tailscale MagicDNS names (jedi.<tailnet>.ts.net).
+# Containers normally do not inherit the host's Tailscale resolver, so a machine advertised by name shows
+# "Web UI: Not reachable (ENOTFOUND)". Enable with either:
+#   docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.tailscale.yml   (in .env)
+# Requires Tailscale on this Docker host. 100.100.100.100 forwards non-tailnet names upstream; 1.1.1.1 is a fallback.
+services:
+  hub:
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1

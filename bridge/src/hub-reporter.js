@@ -36,16 +36,29 @@ function lanAddresses(interfaces = networkInterfaces()) {
 }
 
 /** Addresses the hub could use to reach this gateway. Loopback is useless to a remote hub, so it is not offered. */
-export function advertisedEndpoints({ options, config, lan = lanAddresses }) {
-  if (options.advertise.length) {
-    return options.advertise.flatMap((value) => {
-      try {
-        return [new URL(value).origin]
-      } catch {
-        return []
-      }
-    })
-  }
+export function advertisedEndpoints({ options, config, lan = lanAddresses, warn = () => {} }) {
+  const explicit = (options.advertise ?? []).flatMap((value) => {
+    try {
+      return [new URL(value).origin]
+    } catch {
+      warn(`ignoring --hub-advertise "${value}": it must be a full URL such as http://host:${config.port}; use --hub-advertise-host for just a host name`)
+      return []
+    }
+  })
+  // A bare host gets this gateway's real port, so nothing has to be repeated or kept in sync by hand.
+  const fromHosts = (options.advertiseHosts ?? []).flatMap((value) => {
+    const host = String(value).trim().replace(/^https?:\/\//, "").replace(/\/+$/, "")
+    if (!host) return []
+    const bracketed = host.includes(":") && !host.startsWith("[") && host.split(":").length > 2 ? `[${host}]` : host
+    try {
+      const url = new URL(`http://${bracketed}`)
+      return [`http://${url.hostname.includes(":") && !url.hostname.startsWith("[") ? `[${url.hostname}]` : url.hostname}:${url.port || config.port}`]
+    } catch {
+      warn(`ignoring --hub-advertise-host "${value}": not a valid host name or address`)
+      return []
+    }
+  })
+  if (options.advertise?.length || options.advertiseHosts?.length) return [...new Set([...fromHosts, ...explicit])]
   const host = config.host
   if (host === "0.0.0.0" || host === "::") return lan().map((address) => `http://${address}:${config.port}`)
   if (LOOPBACK.has(host)) return []
@@ -129,8 +142,15 @@ export class HubReporter {
     }
   }
 
+  #warnOnce(message) {
+    this.warned ??= new Set()
+    if (this.warned.has(message)) return
+    this.warned.add(message)
+    this.log(message)
+  }
+
   #shared() {
-    const endpoints = advertisedEndpoints({ options: this.options, config: this.config, lan: this.lan })
+    const endpoints = advertisedEndpoints({ options: this.options, config: this.config, lan: this.lan, warn: (message) => this.#warnOnce(message) })
     const proxy = !this.options.noProxy && Boolean(this.config.username && this.config.password) && endpoints.length > 0
     return { endpoints, proxy, config: describeConfig(this.config, this.version) }
   }
@@ -220,7 +240,8 @@ export class HubReporter {
     this.credentialsSent = shared.proxy
     if (Number.isFinite(response.json.heartbeatIntervalMs) && !this.options.intervalMs) this.intervalMs = response.json.heartbeatIntervalMs
     await writeHubState(this.stateDirectory, {
-      url: this.options.url, machineId: this.identity.id, machineToken: this.machineToken, enrolledAt: new Date().toISOString()
+      url: this.options.url, machineId: this.identity.id, machineToken: this.machineToken, enrolledAt: new Date().toISOString(),
+      ...(this.options.name ? { name: this.options.name } : {}), ...(this.options.advertiseHosts?.length ? { advertiseHosts: this.options.advertiseHosts } : {})
     }).catch((error) => this.log(`could not save hub state (${error.message}); the machine will enroll again on restart`))
     this.backoffMs = 0
     this.#setConnected(true, `enrolled as ${this.options.name ?? this.identity.name}${shared.proxy ? "" : this.options.noProxy ? ", web UI not shared" : ", no reachable address to share"}`)

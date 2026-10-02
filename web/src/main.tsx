@@ -1,19 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
 import ReactDOM from "react-dom/client"
 import { Capacitor } from "@capacitor/core"
-import type { DesktopLocalRuntimeState } from "../electron/ipc-contract"
+import type { DesktopHubState, DesktopLocalRuntimeState } from "../electron/ipc-contract"
 import { installAppPreferences } from "./appPreferences"
 import { installCompletionAudioGuard } from "./completion-audio"
 import { StandaloneUniversalWorkspace } from "./components/standalone-universal-workspace"
 import {
+  clearDesktopHub,
+  configureDesktopHub,
+  desktopHubState,
   desktopLocalRuntimeState,
+  openDesktopHub,
   isDesktopPlatform,
   retryDesktopLocalRuntime,
   syncDesktopProfiles
 } from "./desktopBridge"
 import { clientEnvironment, installClientErrorReporting, postClientLogs } from "./clientLog"
 import { ErrorBoundary } from "./ErrorBoundary"
-import { fetchHubBootstrap, sameHubMachines } from "./hubBootstrap"
+import { desktopHubWorkspaceMachines, fetchHubBootstrap, sameHubMachines } from "./hubBootstrap"
+import { HubControls } from "./components/hub-controls"
 import { installIosSafari } from "./iosSafari"
 import {
   claimMachinePairing,
@@ -94,6 +99,7 @@ function useHubMachines(enabled: boolean) {
   const [phase, setPhase] = useState<"loading" | "settled">(enabled ? "loading" : "settled")
   const [machines, setMachines] = useState<WorkspaceMachine[]>([])
   const [slow, setSlow] = useState(false)
+  const [name, setName] = useState<string | null>(null)
 
   useEffect(() => {
     if (!enabled) return
@@ -128,6 +134,7 @@ function useHubMachines(enabled: boolean) {
       }
       if (result.kind === "ready") {
         detected = true
+        setName(result.name)
         stopReporting ??= installClientErrorReporting({ post: postClientLogs(import.meta.env.BASE_URL), environment: clientEnvironment })
         setMachines((current) => (sameHubMachines(current, result.machines) ? current : result.machines))
         settle()
@@ -161,7 +168,44 @@ function useHubMachines(enabled: boolean) {
     }
   }, [enabled])
 
-  return { phase, machines, slow }
+  return { phase, machines, slow, name }
+}
+
+/**
+ * The desktop app's hub: Electron main enrolls the embedded daemon with the configured hub and keeps
+ * the hub's other machines as main-owned profiles. This only mirrors that state so the machines and
+ * the hub link appear, and carries the Configure hub form's requests across.
+ */
+function useDesktopHub() {
+  const [state, setState] = useState<DesktopHubState | null>(null)
+  useEffect(() => {
+    if (!isDesktopPlatform()) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = async () => {
+      try {
+        const next = await desktopHubState()
+        if (cancelled) return
+        setState((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next))
+        timer = setTimeout(refresh, next?.status === "connected" ? 10_000 : 2_000)
+      } catch {
+        if (!cancelled) timer = setTimeout(refresh, 10_000)
+      }
+    }
+    void refresh()
+    return () => {
+      cancelled = true
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [])
+  const machines = useMemo(() => desktopHubWorkspaceMachines(state), [state])
+  return {
+    state,
+    machines,
+    configure: async (url: string, token: string) => { setState(await configureDesktopHub(url, token)) },
+    disconnect: async () => { setState(await clearDesktopHub()) },
+    open: () => { void openDesktopHub() }
+  }
 }
 
 function HarnessRemoteBoundary() {
@@ -170,11 +214,12 @@ function HarnessRemoteBoundary() {
   const persistedMachines = useMemo(loadWorkspaceMachines, [revision])
   const [localRuntime, setLocalRuntime] = useState<DesktopLocalRuntimeState | null>(null)
   const hub = useHubMachines(!isDesktopPlatform() && !Capacitor.isNativePlatform())
+  const desktopHub = useDesktopHub()
   const machines = useMemo(() => {
     const local = localRuntimeMachine(localRuntime)
-    const owned = [...(local ? [local] : []), ...hub.machines]
+    const owned = [...(local ? [local] : []), ...hub.machines, ...desktopHub.machines]
     return owned.length ? [...owned, ...persistedMachines.filter((machine) => !isRuntimeOwnedMachine(machine))] : persistedMachines
-  }, [localRuntime, hub.machines, persistedMachines])
+  }, [localRuntime, hub.machines, desktopHub.machines, persistedMachines])
   const machinesRef = useRef(machines)
   machinesRef.current = machines
   const pairingInFlightRef = useRef(new Set<string>())
@@ -328,6 +373,12 @@ function HarnessRemoteBoundary() {
   return (
     <>
       <StandaloneUniversalWorkspace
+        hubControls={
+          <HubControls
+            servedByHub={hub.name ? { name: hub.name } : undefined}
+            desktop={isDesktopPlatform() ? { state: desktopHub.state, onConfigure: desktopHub.configure, onDisconnect: desktopHub.disconnect, onOpen: desktopHub.open } : undefined}
+          />
+        }
         machines={machines}
         onPersistMachines={persistMachines}
         onScanMachinePairing={Capacitor.getPlatform() === "android" ? scanPairingQR : undefined}

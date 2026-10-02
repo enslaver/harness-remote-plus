@@ -14,15 +14,22 @@ test("extractHubArgs removes hub flags and leaves everything else in order", () 
   assert.deepEqual(rest, ["--port", "4900", "--root", "/dev", "--cors", "http://localhost:5173"])
   assert.deepEqual(flags, {
     url: "https://hub.example.com", token: "hre_abc", name: "Desk", noProxy: true,
-    advertise: ["http://100.64.0.5:4097", "http://desk:4097"]
+    advertise: ["http://100.64.0.5:4097", "http://desk:4097"], advertiseHosts: []
   })
+})
+
+test("--hub-advertise-name and --hub-advertise-host are parsed; --hub-name stays an alias", () => {
+  const { flags, rest } = extractHubArgs(["--hub", "https://h", "--hub-advertise-name", "jedi", "--hub-advertise-host", "jedi.ts.net"])
+  assert.deepEqual(rest, [])
+  assert.equal(flags.name, "jedi")
+  assert.deepEqual(flags.advertiseHosts, ["jedi.ts.net"])
 })
 
 test("extractHubArgs handles --no-hub and no hub flags at all", () => {
   assert.equal(extractHubArgs(["--no-hub"]).flags.disabled, true)
   const plain = extractHubArgs(["--port", "1"])
   assert.deepEqual(plain.rest, ["--port", "1"])
-  assert.deepEqual(plain.flags, { advertise: [] })
+  assert.deepEqual(plain.flags, { advertise: [], advertiseHosts: [] })
 })
 
 test("a hub flag missing its value fails loudly instead of eating the next option", () => {

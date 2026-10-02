@@ -52,13 +52,40 @@ revoked.
 | --- | --- | --- |
 | `--hub <url>` | `HARNESS_REMOTE_HUB_URL` | Which hub to report to. |
 | `--hub-token <token>` | `HARNESS_REMOTE_HUB_TOKEN` | Enrollment token. Prefer the environment: it stays out of `ps`. |
-| `--hub-name <name>` | `HARNESS_REMOTE_HUB_NAME` | Display name (default: the hostname). |
-| `--hub-advertise <url>` | `HARNESS_REMOTE_HUB_ADVERTISE` | Address the *hub* should use to reach this gateway; repeatable. Use it for a Tailscale/VPN address. Default: the machine's LAN addresses. |
+| `--hub-advertise-name <name>` | `HARNESS_REMOTE_HUB_ADVERTISE_NAME` | Display name (default: the hostname). `--hub-name` / `HARNESS_REMOTE_HUB_NAME` still work. |
+| `--hub-advertise-host <host>` | `HARNESS_REMOTE_HUB_ADVERTISE_HOST` | Host the *hub* should use to reach this gateway, e.g. `jedi.tailnet.ts.net`; repeatable. The port is the gateway's own, detected automatically (`host:port` overrides it). Use it for a Tailscale/VPN name. Default: the machine's LAN addresses. |
+| `--hub-advertise <url>` | `HARNESS_REMOTE_HUB_ADVERTISE` | Full address (scheme and port) for unusual setups. Invalid values are logged and ignored. |
+
+The name and advertise host are saved with the enrollment, so a bare re-run keeps them:
+
+```bash
+HARNESS_REMOTE_HUB_TOKEN=hre_… npx --yes github:enslaver/harness-remote-plus \
+  --hub https://hub.example.com --hub-advertise-name jedi --hub-advertise-host jedi.tailnet.ts.net
+```
 | `--hub-no-proxy` | `HARNESS_REMOTE_HUB_NO_PROXY=1` | Report to the hub but keep the gateway password on the machine. The hub then cannot open its web UI. |
 | `--no-hub` | | Do not contact the hub this run. |
 
 Not supported yet: the launcher's OpenCode-only single mode (`--single --backend opencode`) runs `opencode serve`
 directly, with no Harness process to report from. It says so and continues without the hub.
+
+## The desktop app
+
+The desktop app has a **Configure hub** button in the top bar. Enter the hub's address (`host:port` or a URL) and the
+enrollment token (`HUB_ENROLLMENT_TOKEN`); the app registers its local runtime with the hub, lists the hub's other
+machines next to *This computer*, and shows a **Hub** link to the console. If this computer's runtime is already enrolled with a hub (it ran `--hub` once, or it is the hub's own host), the app follows that hub automatically and the form is not needed. If `HARNESS_REMOTE_HUB_URL` (and
+`HARNESS_REMOTE_HUB_TOKEN`) are already set in the app's environment, the form is read-only and shows that. The token
+stays in the app's main process and is saved owner-only in the app's settings directory.
+
+### Machines advertised by Tailscale name
+
+The hub runs in Docker, and a container does not inherit the host's Tailscale resolver, so a machine advertised as
+`--hub-advertise-host jedi.<tailnet>.ts.net` shows **Web UI: Not reachable (ENOTFOUND)**. Either advertise the
+machine's tailnet IP (`--hub-advertise-host 100.x.y.z`), or enable the override that points the hub at MagicDNS:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.tailscale.yml up -d
+# or put COMPOSE_FILE=docker-compose.yml:docker-compose.tailscale.yml in .env
+```
 
 ## What the hub can and cannot see
 
@@ -165,6 +192,9 @@ Treat it like a password manager: private network or VPN, HTTPS, a long password
 - **Cross-site requests are refused.** State-changing requests that carry the cookie must be same-origin
   (`Sec-Fetch-Site`, falling back to `Origin`). The console is served under `default-src 'none'; script-src 'self'`
   with no inline script or style.
+- **Enrolled machines are trusted peers.** A machine's token can list the fleet (`/api/v1/fleet`) and open any other
+  machine through the proxy, which is how the desktop app shows the hub's machines after you give it the enrollment
+  token. One compromised enrolled machine therefore exposes the rest; revoke its token by deleting it in the console.
 - **Machines authenticate with their own bearer token**, bound to one machine id, stored as a SHA-256 hash. Deleting
   a machine in the console revokes its token immediately; a machine with an enrollment token enrolls itself again,
   one without stops reporting and says why.
@@ -252,7 +282,8 @@ All JSON over HTTP(S). Machine calls carry `Authorization: Bearer <token>`.
 | `GET /api/v1/bootstrap` | cookie | What the web app needs. Signed out: `200 {hub:true, authenticated:false}`. |
 | `GET /api/v1/machines`, `/logs`, … | cookie | The console's API. |
 | `GET /api/v1/sessions?q=&activity=&kind=&ranAfter=&startedAfter=&sort=&limit=&offset=` | cookie | Session search across machines; `total` for paging. See [BACKGROUND_AGENTS.md](BACKGROUND_AGENTS.md#the-hub-when-a-session-started-when-it-last-ran-and-search). |
-| `ANY /m/<machineId>/…` | cookie | Same-origin proxy to a verified machine. |
+| `GET /api/v1/fleet` | machine token | The machines the web app would list, for an enrolled client such as the desktop app. |
+| `ANY /m/<machineId>/…` | cookie or machine token | Same-origin proxy to a verified machine. A machine token may be sent as `Bearer`, or as Basic auth `hub-machine:<token>`. |
 
 ## Developing the hub
 

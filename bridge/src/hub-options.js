@@ -13,7 +13,7 @@ import path from "node:path"
  */
 
 const STATE_FILE = "hub.json"
-const VALUE_FLAGS = new Set(["--hub", "--hub-token", "--hub-name", "--hub-advertise"])
+const VALUE_FLAGS = new Set(["--hub", "--hub-token", "--hub-name", "--hub-advertise-name", "--hub-advertise", "--hub-advertise-host"])
 const BOOLEAN_FLAGS = new Set(["--hub-no-proxy", "--no-hub"])
 
 export function normalizeHubUrl(value) {
@@ -30,7 +30,7 @@ export function normalizeHubUrl(value) {
 
 /** Splits hub flags out of `args` so the existing option parsers never see (and reject) them. */
 export function extractHubArgs(args) {
-  const flags = { advertise: [] }
+  const flags = { advertise: [], advertiseHosts: [] }
   const rest = []
   for (let index = 0; index < args.length; index += 1) {
     const option = args[index]
@@ -40,7 +40,8 @@ export function extractHubArgs(args) {
       index += 1
       if (option === "--hub") flags.url = value
       else if (option === "--hub-token") flags.token = value
-      else if (option === "--hub-name") flags.name = value
+      else if (option === "--hub-name" || option === "--hub-advertise-name") flags.name = value
+      else if (option === "--hub-advertise-host") flags.advertiseHosts.push(value)
       else flags.advertise.push(value)
     } else if (BOOLEAN_FLAGS.has(option)) {
       if (option === "--hub-no-proxy") flags.noProxy = true
@@ -94,17 +95,22 @@ export async function resolveHubOptions({ flags, environment = process.env, stat
   const enrollmentToken = flags.token ?? environment.HARNESS_REMOTE_HUB_TOKEN ?? undefined
   // A saved machine token belongs to the hub that issued it; pointing elsewhere means enrolling afresh.
   const machineToken = saved && saved.url === url && saved.machineToken ? saved.machineToken : undefined
-  const advertise = flags.advertise.length
-    ? flags.advertise
-    : (environment.HARNESS_REMOTE_HUB_ADVERTISE ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+  const list = (value) => String(value ?? "").split(",").map((item) => item.trim()).filter(Boolean)
+  const advertise = flags.advertise.length ? flags.advertise : list(environment.HARNESS_REMOTE_HUB_ADVERTISE)
+  // Name and route-back host are remembered with the enrollment, so a bare re-run keeps them.
+  const remembered = saved && saved.url === url ? saved : undefined
+  const advertiseHosts = flags.advertiseHosts?.length
+    ? flags.advertiseHosts
+    : list(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST).length ? list(environment.HARNESS_REMOTE_HUB_ADVERTISE_HOST) : remembered?.advertiseHosts ?? []
 
   const intervalOverride = Number(environment.HARNESS_REMOTE_HUB_INTERVAL_MS)
   return {
     url,
     enrollmentToken,
     machineToken,
-    name: flags.name ?? environment.HARNESS_REMOTE_HUB_NAME ?? undefined,
+    name: flags.name ?? environment.HARNESS_REMOTE_HUB_ADVERTISE_NAME ?? environment.HARNESS_REMOTE_HUB_NAME ?? remembered?.name ?? undefined,
     advertise,
+    advertiseHosts,
     noProxy: Boolean(flags.noProxy) || truthy(environment.HARNESS_REMOTE_HUB_NO_PROXY),
     intervalMs: Number.isFinite(intervalOverride) && intervalOverride >= 1_000 ? intervalOverride : undefined
   }
@@ -113,9 +119,11 @@ export async function resolveHubOptions({ flags, environment = process.env, stat
 export const HUB_USAGE = `Hub options (optional, report this machine to a Harness Remote Hub):
   --hub <url>              Hub address, e.g. https://hub.example.com (remembered after the first run)
   --hub-token <token>      Enrollment token from the hub's "Add machine" page (or HARNESS_REMOTE_HUB_TOKEN)
-  --hub-name <name>        Display name for this machine (default: its hostname)
-  --hub-advertise <url>    Address the hub should use to reach this gateway; repeatable
-                           (default: this machine's LAN addresses; use it for a Tailscale/VPN address)
+  --hub-advertise-name <name>  Display name for this machine (default: its hostname; --hub-name still works)
+  --hub-advertise-host <host>  Host the hub should use to reach this gateway, e.g. jedi.tailnet.ts.net; repeatable.
+                           The port is this gateway's own, detected automatically
+                           (default: this machine's LAN addresses; use it for a Tailscale/VPN name)
+  --hub-advertise <url>    Full address (scheme and port) for the hub to use; repeatable, for unusual setups
   --hub-no-proxy           Report to the hub but keep the gateway password on this machine
                            (the hub then cannot open this machine's web UI)
   --no-hub                 Do not contact the hub this run`

@@ -7,6 +7,7 @@ import type {
   DesktopEventMessage,
   DesktopEventStatus,
   DesktopEventSubscriptionOptions,
+  DesktopHubState,
   DesktopLocalRuntimeState,
   DesktopMenuCommand,
   DesktopMenuTemplate,
@@ -24,6 +25,10 @@ const IPC_CHANNELS = Object.freeze({
   unsubscribeEvents: "desktop:events:unsubscribe",
   getLocalRuntime: "desktop:runtime:local:get",
   retryLocalRuntime: "desktop:runtime:local:retry",
+  getHub: "desktop:hub:get",
+  configureHub: "desktop:hub:configure",
+  clearHub: "desktop:hub:clear",
+  openHub: "desktop:hub:open",
   notifyCompletion: "desktop:completion:notify",
   notifyAttention: "desktop:attention:notify",
   attentionActivated: "desktop:attention:activated",
@@ -71,6 +76,18 @@ const harnessDesktop = Object.freeze({
   },
   retryLocalRuntime(): Promise<DesktopLocalRuntimeState> {
     return ipcRenderer.invoke(IPC_CHANNELS.retryLocalRuntime)
+  },
+  getHubState(): Promise<DesktopHubState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.getHub)
+  },
+  configureHub(url: string, token: string): Promise<DesktopHubState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.configureHub, url, token)
+  },
+  clearHub(): Promise<DesktopHubState> {
+    return ipcRenderer.invoke(IPC_CHANNELS.clearHub)
+  },
+  openHub(): Promise<boolean> {
+    return ipcRenderer.invoke(IPC_CHANNELS.openHub)
   },
   async subscribeEvents(
     profileId: string,

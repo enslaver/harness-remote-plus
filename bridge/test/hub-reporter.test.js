@@ -148,6 +148,16 @@ test("a gateway with no password shares nothing to proxy with", async () => {
   }
 })
 
+test("advertisedEndpoints: --hub-advertise-host gets this gateway's own port; bad values warn instead of vanishing", () => {
+  const lan = () => ["10.0.0.5"]
+  const warnings = []
+  const warn = (message) => warnings.push(message)
+  assert.deepEqual(advertisedEndpoints({ options: { advertise: [], advertiseHosts: ["jedi.tail1.ts.net"] }, config: { ...baseConfig, port: 4123 }, lan, warn }), ["http://jedi.tail1.ts.net:4123"])
+  assert.deepEqual(advertisedEndpoints({ options: { advertise: [], advertiseHosts: ["jedi:5000", "100.64.0.5"] }, config: baseConfig, lan, warn }), ["http://jedi:5000", "http://100.64.0.5:4097"])
+  assert.deepEqual(advertisedEndpoints({ options: { advertise: ["jedi.tail1.ts.net"] }, config: baseConfig, lan, warn }), [])
+  assert.match(warnings[0], /--hub-advertise-host/)
+})
+
 test("advertisedEndpoints: explicit list wins, wildcard uses LAN addresses, specific host is used as-is", () => {
   const lan = () => ["10.0.0.5", "192.168.1.20"]
   assert.deepEqual(advertisedEndpoints({ options: { advertise: ["http://100.64.0.5:4097/", "junk"] }, config: baseConfig, lan }), ["http://100.64.0.5:4097"])

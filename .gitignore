@@ -21,3 +21,4 @@ hub/node_modules/
 .env
 deploy/data/
 hub/browser-artifacts/
+.claude/
