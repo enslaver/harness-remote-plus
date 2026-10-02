@@ -137,7 +137,7 @@ party entirely.
 ### Claude Code — ACP over stdio, via the official adapter
 
 - **Adapter:** [`@agentclientprotocol/claude-agent-acp`](https://www.npmjs.com/package/@agentclientprotocol/claude-agent-acp),
-  which wraps the Claude Agent SDK and speaks ACP over stdio. **Pinned to `0.75.1`** in
+  which wraps the Claude Agent SDK and speaks ACP over stdio. **Pinned to `0.84.0`** in
   `bridge/src/harness-profiles.js`.
 - **Authentication:** the host must already have `claude login` credentials, `ANTHROPIC_API_KEY`, or another
   provider configured for the adapter (Bedrock, Vertex, Foundry, or an Anthropic-compatible gateway through

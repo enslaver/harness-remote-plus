@@ -1,7 +1,7 @@
 {
   "name": "harness-remote-plus-web",
   "private": true,
-  "version": "3.1.0",
+  "version": "3.1.1-plus",
   "description": "Companion app for controlling coding-agent harnesses from phone or desktop",
   "homepage": "https://github.com/enslaver/harness-remote-plus",
   "author": {

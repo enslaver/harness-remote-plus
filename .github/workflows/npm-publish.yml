@@ -118,7 +118,7 @@ jobs:
 
       - name: Publish with npm Trusted Publishing
         if: steps.npm.outputs.publish == 'true'
-        run: npm publish --access public --provenance --loglevel verbose
+        run: npm publish --access public --provenance --tag latest --loglevel verbose
 
       - name: Verify npm release is visible as latest
         shell: bash
