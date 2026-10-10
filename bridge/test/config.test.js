@@ -47,7 +47,7 @@ test("selects PI defaults for the ACP backend", () => {
 })
 
 test("selects Codex defaults for the ACP backend", () => {
-  const expectedArgs = ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"]
+  const expectedArgs = ["--yes", "--package=@agentclientprotocol/codex-acp@1.13.1", "codex-acp"]
   assert.deepEqual(parseConfig(["--backend", "codex"], {}).backend, "codex")
   assert.equal(parseConfig(["--backend", "codex"], {}).acpCommand, process.platform === "win32" ? "npx.cmd" : "npx")
   // The adapter embeds @openai/codex, so no separate Codex installation is required; the

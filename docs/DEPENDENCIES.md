@@ -176,7 +176,7 @@ expose agent selection, server slash commands or VCS/diff for this backend.
 ### Codex CLI — ACP over stdio, via the official adapter
 
 - **Adapter:** [`@agentclientprotocol/codex-acp`](https://www.npmjs.com/package/@agentclientprotocol/codex-acp),
-  published by the Agent Client Protocol project, MIT. **Pinned to `1.1.14`** in
+  published by the Agent Client Protocol project, MIT. **Pinned to `1.13.1`** in
   `bridge/src/harness-profiles.js`.
 - **The adapter embeds `@openai/codex`**, so no separate Codex installation is needed on the host —
   but credentials still come from `codex login` (ChatGPT account), an `OPENAI_API_KEY` in the

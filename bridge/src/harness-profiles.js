@@ -141,7 +141,7 @@ export const HARNESS_PROFILES = {
     command: process.platform === "win32" ? "npx.cmd" : "npx",
     // Pinned to avoid the `notarget` scenario that PI hit. Like PI, install the scoped package
     // explicitly and invoke its published binary instead of relying on npx package-spec inference.
-    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"],
+    args: ["--yes", "--package=@agentclientprotocol/codex-acp@1.13.1", "codex-acp"],
     adapterCommand: "codex-acp",
     permissionMode: "allow",
     // The adapter offers `api-key` before `chat-gpt`; the former demands CODEX_API_KEY or
