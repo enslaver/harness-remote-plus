@@ -52,7 +52,7 @@ test("an ACP adapter already on PATH is preferred over fetching one", async () =
   const expectedFallbacks = {
     pi: ["--yes", "--package=@automatalabs/pi-acp@0.5.0", "pi-acp"],
     claude: ["--yes", "--package=@agentclientprotocol/claude-agent-acp@0.84.0", "claude-agent-acp"],
-    codex: ["--yes", "--package=@agentclientprotocol/codex-acp@1.1.14", "codex-acp"]
+    codex: ["--yes", "--package=@agentclientprotocol/codex-acp@1.13.1", "codex-acp"]
   }
   for (const [backend, args] of Object.entries(expectedFallbacks)) {
     const profile = harnessProfile(backend)

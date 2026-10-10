@@ -514,7 +514,7 @@ npx --yes ./bridge \
   --root "$HOME/Software"
 ```
 
-The `codex` backend defaults to `npx -y @agentclientprotocol/codex-acp@1.1.14` and authenticates
+The `codex` backend defaults to `npx -y @agentclientprotocol/codex-acp@1.13.1` and authenticates
 through the adapter's ChatGPT method, so a `codex login` on the host machine is what the bridge
 uses — an `OPENAI_API_KEY` environment variable works too, but is not required and is not preferred.
 The version is pinned to avoid the same `notarget` issue that motivated pinning the PI adapter. Use
